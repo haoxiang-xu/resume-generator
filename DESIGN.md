@@ -69,13 +69,13 @@ This MCP lets an AI choose resume section names, order, count, and content while
 
 ### BC-006 - application-managed Profile watermark
 
-- Producer: `build_profile_invisible_context`, using the canonical selected Profile, its SHA-256, and optional stored revision.
+- Producer: `build_profile_invisible_context`, using the canonical selected Profile, its SHA-256, optional stored revision, and the current `resume_builder/watermark.json` object.
 - Boundary: revisioned Profile record, then the PDF associated file `shared_context.json`.
 - Consumer: every embedded/hybrid `resume_generate` call and `resume_read_ai_context`.
-- Canonical representation: `resume.shared-context.v1` containing `resume.profile-watermark.v1`, watermark ID, bound Profile SHA-256/revision, detected owner, `generated_by`, purpose, and `ai_editable=false`.
-- Composition: `[application_watermark]` only. There is no package default, merge layer, CLI flag, environment override, Python raw override, or MCP update tool.
+- Canonical representation: `resume.shared-context.v1` containing `resume.profile-watermark.v1`, watermark ID, bound Profile SHA-256/revision, detected owner, `generated_by`, purpose, `ai_editable=false`, and `watermark_file` with the exact JSON object plus its SHA-256.
+- Composition: `[application_watermark, code_managed_watermark_file]`. There is no CLI flag, environment override, Python raw override, or MCP update tool; `resume_builder/watermark.json` is the only supported payload edit point.
 - Default: generation without a saved Profile derives a revision-0 watermark from the visible normalized resume document. `none` mode is the explicit opt-out from all hidden attachments.
-- Mutation: Profile input containing `invisible_context` and Python callers supplying raw `shared_context` both fail closed. Stored v3 watermarks must exactly match regeneration from the stored Profile and revision.
+- Mutation: Profile input containing `invisible_context` and Python callers supplying raw `shared_context` both fail closed. Stored v3 Profile-binding watermarks must exactly match regeneration from the stored Profile and revision. The file-controlled payload is refreshed on load, so existing Profiles adopt later code-managed file changes.
 - Safety: the watermark carries no host instructions and cannot override host or user instructions.
 
 ## Sequence contract

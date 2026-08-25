@@ -1,7 +1,10 @@
 import json
+import hashlib
 
 import pytest
 
+import resume_builder.profile_store as profile_store
+from resume_builder.ai_context import canonical_profile_bytes
 from resume_builder.flexible_schema import EXAMPLE_DOCUMENT
 from resume_builder.mcp_server import (
     generate_payload,
@@ -14,6 +17,7 @@ from resume_builder.mcp_server import (
 from resume_builder.profile_store import (
     PROFILE_SCHEMA_VERSION,
     ProfileStoreError,
+    load_watermark_file,
     load_profile,
     profile_path,
     search_profile,
@@ -51,7 +55,10 @@ def test_profile_update_previews_before_commit(tmp_path) -> None:
     assert record is None
     assert preview["next_revision"] == 1
     assert preview["added_top_level_keys"] == ["basics", "facts"]
-    assert preview["invisible_context_added_top_level_keys"] == ["watermark"]
+    assert preview["invisible_context_added_top_level_keys"] == [
+        "watermark",
+        "watermark_file",
+    ]
     assert preview["watermark"]["ai_editable"] is False
     assert not profile_path(tmp_path).exists()
 
@@ -102,10 +109,55 @@ def test_stored_profile_rejects_watermark_tampering(tmp_path) -> None:
     destination = profile_path(tmp_path)
     stored = json.loads(destination.read_text(encoding="utf-8"))
     stored["invisible_context"]["watermark"]["ai_editable"] = True
+    stored["invisible_context_sha256"] = hashlib.sha256(
+        canonical_profile_bytes(stored["invisible_context"])
+    ).hexdigest()
     destination.write_text(json.dumps(stored), encoding="utf-8")
 
     with pytest.raises(ProfileStoreError, match="application-generated watermark"):
         load_profile(tmp_path)
+
+
+def test_watermark_file_is_included_with_its_sha256(tmp_path) -> None:
+    source = tmp_path / "watermark.json"
+    payload = {"verification": {"manual": ["Check supporting evidence."]}}
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_watermark_file(source)
+
+    assert loaded == payload
+
+
+def test_existing_profile_picks_up_current_watermark_file(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "watermark.json"
+    workspace = tmp_path / "workspace"
+    source.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    monkeypatch.setattr(profile_store, "WATERMARK_FILE_PATH", source)
+    created, _ = update_profile(workspace, json.dumps(PROFILE), 0, confirm=True)
+    assert created is not None
+    assert created.invisible_context["watermark_file"]["content"] == {"version": 1}
+
+    source.write_text(json.dumps({"version": 2, "notes": ["current"]}), encoding="utf-8")
+    loaded = load_profile(workspace)
+
+    assert loaded is not None
+    assert loaded.invisible_context["watermark_file"]["content"] == {
+        "version": 2,
+        "notes": ["current"],
+    }
+    expected = hashlib.sha256(
+        canonical_profile_bytes({"version": 2, "notes": ["current"]})
+    ).hexdigest()
+    assert loaded.invisible_context["watermark_file"]["sha256"] == expected
+
+
+@pytest.mark.parametrize("content", ["[]", "not-json"])
+def test_watermark_file_must_contain_a_json_object(tmp_path, content) -> None:
+    source = tmp_path / "watermark.json"
+    source.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ProfileStoreError, match="watermark"):
+        load_watermark_file(source)
 
 
 def test_profile_path_rejects_symlink_escape(tmp_path) -> None:

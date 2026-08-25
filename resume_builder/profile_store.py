@@ -19,6 +19,7 @@ LEGACY_PROFILE_SCHEMA_VERSIONS = {
     "resume.career-profile.v2",
 }
 WATERMARK_SCHEMA_VERSION = "resume.profile-watermark.v1"
+WATERMARK_FILE_PATH = Path(__file__).with_name("watermark.json")
 PROFILE_DIRECTORY = ".resume"
 PROFILE_FILENAME = "career_profile.json"
 INVISIBLE_CONTEXT_KEY = "invisible_context"
@@ -176,6 +177,24 @@ def _profile_owner(profile: dict[str, Any]) -> str | None:
     return name or None
 
 
+def load_watermark_file(path: Path | None = None) -> dict[str, Any]:
+    """Load the code-managed JSON payload included in every invisible context."""
+    source = path or WATERMARK_FILE_PATH
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProfileStoreError(f"could not read watermark file {source}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ProfileStoreError("watermark.json must contain a JSON object")
+    try:
+        encoded = canonical_profile_bytes(payload)
+    except AIContextError as exc:
+        raise ProfileStoreError(f"invalid watermark.json: {exc}") from exc
+    if len(encoded) > INVISIBLE_CONTEXT_MAX_BYTES:
+        raise ProfileStoreError("watermark.json exceeds the 250,000 byte limit")
+    return payload
+
+
 def build_profile_invisible_context(
     profile: dict[str, Any],
     revision: int | None = None,
@@ -185,7 +204,9 @@ def build_profile_invisible_context(
         raise ProfileStoreError("career profile must be a JSON object")
     profile_sha256 = hashlib.sha256(canonical_profile_bytes(profile)).hexdigest()
     revision_value = revision if revision is not None else 0
-    return {
+    watermark_file = load_watermark_file()
+    watermark_file_bytes = canonical_profile_bytes(watermark_file)
+    context = {
         "watermark": {
             "schema_version": WATERMARK_SCHEMA_VERSION,
             "watermark_id": f"resume-{profile_sha256[:24]}-r{revision_value}",
@@ -195,8 +216,14 @@ def build_profile_invisible_context(
             "generated_by": "Resume Studio",
             "ai_editable": False,
             "purpose": "Bind this PDF's invisible context to its Career Profile.",
-        }
+        },
+        "watermark_file": {
+            "sha256": hashlib.sha256(watermark_file_bytes).hexdigest(),
+            "content": watermark_file,
+        },
     }
+    validate_invisible_context(context)
+    return context
 
 
 def validate_invisible_context(context: dict[str, Any]) -> list[str]:
@@ -332,14 +359,21 @@ def load_profile(workspace_root: Path) -> ProfileRecord | None:
     validate_profile(profile)
     generated_context = build_profile_invisible_context(profile, revision)
     if stored_schema_version == PROFILE_SCHEMA_VERSION:
-        invisible_context = raw.get(INVISIBLE_CONTEXT_KEY)
-        if not isinstance(invisible_context, dict):
+        stored_context = raw.get(INVISIBLE_CONTEXT_KEY)
+        if not isinstance(stored_context, dict):
             raise ProfileStoreError("stored invisible_context must be a JSON object")
-        validate_invisible_context(invisible_context)
-        if invisible_context != generated_context:
+        validate_invisible_context(stored_context)
+        expected_context_sha256 = str(raw.get("invisible_context_sha256", ""))
+        stored_context_sha256 = hashlib.sha256(
+            canonical_profile_bytes(stored_context)
+        ).hexdigest()
+        if expected_context_sha256 and expected_context_sha256 != stored_context_sha256:
+            raise ProfileStoreError("stored invisible context SHA-256 does not match its content")
+        if stored_context.get("watermark") != generated_context["watermark"]:
             raise ProfileStoreError(
                 "stored invisible context does not match the application-generated watermark"
             )
+        invisible_context = generated_context
     else:
         invisible_context = generated_context
     record = ProfileRecord(
@@ -351,13 +385,6 @@ def load_profile(workspace_root: Path) -> ProfileRecord | None:
     expected_sha256 = str(raw.get("profile_sha256", ""))
     if expected_sha256 and expected_sha256 != record.profile_sha256:
         raise ProfileStoreError("stored career profile SHA-256 does not match its content")
-    expected_context_sha256 = str(raw.get("invisible_context_sha256", ""))
-    if (
-        stored_schema_version == PROFILE_SCHEMA_VERSION
-        and expected_context_sha256
-        and expected_context_sha256 != record.invisible_context_sha256
-    ):
-        raise ProfileStoreError("stored invisible context SHA-256 does not match its content")
     return record
 
 

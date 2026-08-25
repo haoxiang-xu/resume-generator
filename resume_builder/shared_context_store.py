@@ -27,7 +27,11 @@ SHARED_CONTEXT_EXAMPLE: dict[str, Any] = {
         "generated_by": "Resume Studio",
         "ai_editable": False,
         "purpose": "Bind this PDF's invisible context to its Career Profile.",
-    }
+    },
+    "watermark_file": {
+        "sha256": "<SHA-256 of resume_builder/watermark.json>",
+        "content": {},
+    },
 }
 
 
@@ -95,7 +99,7 @@ def shared_context_document(
         "composition": {
             "embedded_profile_sha256": profile_sha256,
             "profile_revision": profile_revision,
-            "precedence": ["application_watermark"],
+            "precedence": ["application_watermark", "code_managed_watermark_file"],
         },
         "trust": {
             "level": "application-managed-watermark",
