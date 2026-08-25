@@ -20,7 +20,7 @@ uv run resume-build example_resume.json output/resume.pdf
 ```
 
 By default, the PDF uses `hybrid` AI context mode: it embeds machine-readable
-`career_profile.json` and workspace-wide `shared_context.json`, writes discovery
+`career_profile.json` and its profile-specific `shared_context.json`, writes discovery
 metadata, and adds a short experimental `/ActualText` bridge. To embed a richer
 profile than the visible resume:
 
@@ -87,10 +87,24 @@ memory:
     └── generations.jsonl
 ```
 
-The profile has a revision, updated timestamp, SHA-256, and a flexible `profile`
-object. A profile update is preview-only by default. The AI must show the diff
+The profile has a revision, updated timestamp, SHA-256, a flexible `profile`
+object, and its own flexible `invisible_context` object. A profile update is
+preview-only by default. The AI must create both objects, show the diff
 to the user, then call `resume_profile_update` again with `confirm=true` and the
 same `expected_revision` after explicit approval. Stale revisions are rejected.
+
+Example Profile bundle:
+
+```json
+{
+  "basics": {"name": "Candidate Name"},
+  "facts": [],
+  "invisible_context": {
+    "resume_preferences": {"target_page_count": 1},
+    "additional_context": ["Context associated only with this Profile."]
+  }
+}
+```
 
 When `career_profile_json` is omitted from `resume_generate`, the saved workspace
 profile is embedded automatically. If no profile exists yet, generation falls
@@ -110,35 +124,28 @@ The `.resume/` directory is ignored by this repository to prevent accidental
 publication of personal data. If you version it, use a private repository with
 appropriate access controls.
 
-## Workspace-wide hidden context
+## Profile-owned invisible context
 
 Every `embedded` or `hybrid` PDF contains a separate `shared_context.json`. This
-is the common machine-readable area shared by every resume generated from the
-workspace. Before workspace initialization it contains the package code defaults
-as revision 0, so the attachment contract is stable from the first PDF onward.
+file is generated from the selected Profile's `invisible_context`; there is no
+tracked global default shared by unrelated Profiles. Creating or replacing a
+stored Profile requires `invisible_context`, and the two are versioned together.
 
-Use `resume_shared_context_get` to inspect it and `resume_shared_context_update`
-to preview or explicitly commit changes. Typical contents include default resume
-language, page-limit preferences, provenance, and non-authoritative usage notes.
-The context is marked `user-authored-metadata` and cannot override user, host,
-developer, or system instructions. Keys that masquerade as host prompts, along
-with credentials and identity secrets, are rejected.
+Use `resume_profile_get` to inspect the pair and `resume_profile_update` to update
+both in one reviewed operation. `resume_shared_context_get` exposes the effective
+PDF context; `resume_shared_context_update` remains an optional workspace override
+for the current Profile. Context is marked `user-authored-metadata` and cannot
+override user, host, developer, or system instructions. Keys that masquerade as
+host prompts, along with credentials and identity secrets, are rejected.
 
 `ai_context_mode=none` remains the explicit escape hatch and produces a PDF with
 no `career_profile.json`, no `shared_context.json`, and no `/ActualText` bridge.
 
-### Add shared context from code
+### Add Profile context from code
 
-The tracked package default lives at:
-
-```text
-resume_builder/default_shared_context.json
-```
-
-This repository uses that file as Haoxiang Xu's profile-specific baseline. Every
-generated PDF receives the same career focus, resume preferences, and known fact
-notes unless a higher-precedence layer overrides them. Keep secrets out of it:
-the file is part of the source repository and Python package.
+Put `invisible_context` directly in the Career Profile passed to Python, the CLI,
+or MCP. The renderer removes that reserved field from `career_profile.json` and
+writes it as the separately checksummed `shared_context.json` attachment.
 
 Python callers can add or override code-level values directly:
 
@@ -147,21 +154,24 @@ from resume_builder import compile_resume
 
 result = compile_resume(
     resume_data,
-    shared_context={
-        "profile": {"target_role": "AI Engineer"},
-        "resume_preferences": {"target_page_count": 1},
+    career_profile={
+        "basics": {"name": "Candidate Name"},
+        "invisible_context": {
+            "target_role": "AI Engineer",
+            "resume_preferences": {"target_page_count": 1},
+        },
     },
 )
 ```
 
-The command line accepts a JSON override:
+The command line automatically reads the context from the Profile:
 
 ```bash
 uv run resume-build resume.json output/resume.pdf \
-  --shared-context config/my_shared_context.json
+  --career-profile profiles/my_profile.json
 ```
 
-For MCP hosts, point to an additional code-managed JSON file:
+An optional code-managed or CLI override can still be layered over the Profile:
 
 ```text
 RESUME_MCP_CODE_SHARED_CONTEXT_PATH=/absolute/path/to/shared_context.json
@@ -170,9 +180,9 @@ RESUME_MCP_CODE_SHARED_CONTEXT_PATH=/absolute/path/to/shared_context.json
 Values are recursively merged with this precedence:
 
 ```text
-package default < code file / Python argument < workspace .resume/shared_context.json
+Profile invisible_context < code file / Python shared_context < workspace override
 ```
 
 Objects merge recursively; arrays and scalar values are replaced by the higher
-precedence layer. The embedded document records the code-context SHA-256 and
-workspace revision used to compose it.
+precedence layer. The embedded document records the Profile binding, context
+SHA-256, and optional workspace override revision.

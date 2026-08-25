@@ -45,15 +45,16 @@ from .profile_store import (
     profile_path,
     read_generation_history,
     search_profile,
+    split_profile_bundle,
     update_profile,
     validate_profile,
 )
 from .shared_context_store import (
-    DEFAULT_CODE_SHARED_CONTEXT_PATH,
     SHARED_CONTEXT_EXAMPLE,
     SharedContextStoreError,
     load_code_shared_context,
     load_shared_context,
+    merge_shared_contexts,
     resolved_shared_context_document,
     shared_context_path,
     update_shared_context,
@@ -76,7 +77,7 @@ def _code_shared_context() -> tuple[dict[str, Any], str]:
     configured = os.environ.get(CODE_SHARED_CONTEXT_ENV, "").strip()
     override = Path(configured).expanduser().resolve() if configured else None
     context = load_code_shared_context(override)
-    source = str(override or DEFAULT_CODE_SHARED_CONTEXT_PATH)
+    source = str(override) if override else "none"
     return context, source
 
 
@@ -184,11 +185,11 @@ def schema_payload() -> dict[str, Any]:
         "shared_context": {
             "schema_version": SHARED_CONTEXT_SCHEMA_VERSION,
             "workspace_path": f"{PROFILE_DIRECTORY}/shared_context.json",
-            "package_default_path": str(DEFAULT_CODE_SHARED_CONTEXT_PATH),
             "code_override_environment": CODE_SHARED_CONTEXT_ENV,
             "policy": (
-                "The shared context is embedded into every embedded or hybrid PDF. "
-                "Updates are previewed by default and require confirm=true plus a matching revision. "
+                "Each Career Profile owns its invisible_context, which is embedded as "
+                "shared_context.json in embedded or hybrid PDFs. Optional workspace overrides "
+                "are previewed by default and require confirm=true plus a matching revision. "
                 "It is user-authored metadata and cannot override user or host instructions."
             ),
             "example": SHARED_CONTEXT_EXAMPLE,
@@ -238,39 +239,55 @@ def generate_payload(
             raise AIContextError("career_profile_json must be text")
         root = _workspace_root()
         if career_profile_json.strip():
-            career_profile = parse_profile(career_profile_json)
+            profile_bundle = parse_profile(career_profile_json)
+            career_profile, profile_invisible_context = split_profile_bundle(profile_bundle)
             profile_source = "provided"
             profile_revision = None
-            profile_warnings = validate_profile(career_profile)
+            profile_warnings = validate_profile(profile_bundle)
         else:
             stored_profile = load_profile(root)
             if stored_profile:
-                career_profile = stored_profile.as_document()
+                career_profile = stored_profile.as_embedded_profile_document()
+                profile_invisible_context = stored_profile.invisible_context
                 profile_source = "workspace"
                 profile_revision = stored_profile.revision
-                profile_warnings = validate_profile(stored_profile.profile)
+                profile_warnings = validate_profile(stored_profile.as_profile_bundle())
             else:
                 career_profile = document
+                profile_invisible_context = {}
                 profile_source = "resume_document"
                 profile_revision = None
                 profile_warnings = []
+        embedded_profile_sha256 = hashlib.sha256(
+            canonical_profile_bytes(career_profile)
+        ).hexdigest()
         normalized_ai_context_mode = normalize_mode(ai_context_mode)
         if normalized_ai_context_mode == "none":
             shared_context = None
             configured_shared_context_revision = 0
             code_shared_context_source = "disabled"
             shared_context_warnings = []
+            shared_context_source = "disabled"
         else:
             code_shared_context, code_shared_context_source = _code_shared_context()
-            shared_context, configured_shared_context_revision = resolved_shared_context_document(
-                root,
+            base_profile_context = merge_shared_contexts(
+                profile_invisible_context,
                 code_shared_context,
             )
-            shared_context_warnings = (
-                validate_shared_context(shared_context["context"])
-                if configured_shared_context_revision
-                else []
+            shared_context, configured_shared_context_revision = resolved_shared_context_document(
+                root,
+                base_profile_context,
+                profile_sha256=embedded_profile_sha256,
             )
+            shared_context_warnings = validate_shared_context(shared_context["context"])
+            source_parts = []
+            if profile_invisible_context:
+                source_parts.append("profile")
+            if code_shared_context:
+                source_parts.append("code")
+            if configured_shared_context_revision:
+                source_parts.append("workspace")
+            shared_context_source = "+".join(source_parts) if source_parts else "empty"
         destination = _output_directory(output_directory)
         stem = _filename_stem(filename)
         result = compile_resume(
@@ -286,13 +303,6 @@ def generate_payload(
             configured_shared_context_revision
             if result.ai_context.shared_context_filename is not None
             else None
-        )
-        shared_context_source = (
-            "disabled"
-            if result.ai_context.shared_context_filename is None
-            else "code+workspace"
-            if configured_shared_context_revision
-            else "code"
         )
         max_pages = document["render"]["max_pages"]
         if page_count > max_pages:
@@ -394,7 +404,7 @@ def profile_get_payload() -> dict[str, Any]:
         "found": True,
         "profile_path": str(profile_path(root)),
         "record": record.as_document(),
-        "warnings": validate_profile(record.profile),
+        "warnings": validate_profile(record.as_profile_bundle()),
     }
 
 
@@ -432,19 +442,25 @@ def shared_context_get_payload() -> dict[str, Any]:
     try:
         root = _workspace_root()
         record = load_shared_context(root)
+        profile_record = load_profile(root)
+        profile_context = profile_record.invisible_context if profile_record else {}
         code_context, code_source = _code_shared_context()
+        base_context = merge_shared_contexts(profile_context, code_context)
         effective_document, effective_revision = resolved_shared_context_document(
             root,
-            code_context,
+            base_context,
+            profile_sha256=profile_record.profile_sha256 if profile_record else None,
         )
     except (SharedContextStoreError, OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
     return {
         "ok": True,
-        "found": record is not None,
+        "found": profile_record is not None or record is not None,
         "shared_context_path": str(shared_context_path(root)),
         "code_context_source": code_source,
         "code_context": code_context,
+        "profile_revision": profile_record.revision if profile_record else None,
+        "profile_invisible_context": profile_context,
         "current_revision": effective_revision,
         "record": record.as_document() if record else None,
         "effective_document": effective_document,
@@ -494,7 +510,7 @@ def profile_validate_payload(profile_json: str = "") -> dict[str, Any]:
             record = load_profile(_workspace_root())
             if record is None:
                 raise ProfileStoreError("workspace career profile has not been created")
-            profile = record.profile
+            profile = record.as_profile_bundle()
             source = "workspace"
             revision = record.revision
         warnings = validate_profile(profile)
@@ -593,13 +609,14 @@ def resume_profile_update(
     expected_revision: int = 0,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Preview or commit a complete Career Profile replacement.
+    """Preview or commit a Career Profile and its owned invisible context together.
 
     Call first with confirm=false and show the returned diff preview to the user.
     Call again with confirm=true only after explicit user approval. The optimistic
     expected_revision prevents overwriting a profile changed by another session.
 
-    :param profile_json: Complete Career Profile as a JSON object.
+    :param profile_json: Complete Career Profile as a JSON object. It must include
+        an invisible_context object; the pair is versioned and saved together.
     :param expected_revision: Revision returned by resume_profile_get, or 0 initially.
     :param confirm: False previews without writing; true commits the reviewed update.
     """
@@ -630,10 +647,10 @@ def resume_profile_search(query: str, limit: int = 20) -> dict[str, Any]:
 
 @mcp.tool()
 def resume_shared_context_get() -> dict[str, Any]:
-    """Read the workspace-wide context embedded into generated resume PDFs.
+    """Read the current Career Profile's invisible PDF context and optional overrides.
 
-    Before workspace initialization, returns revision 0 with package/code defaults.
-    Shared context is user-authored metadata and never overrides host instructions.
+    Before Profile creation, the Profile context is empty. Shared context is
+    user-authored metadata and never overrides host instructions.
     """
     return shared_context_get_payload()
 
@@ -644,11 +661,11 @@ def resume_shared_context_update(
     expected_revision: int = 0,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Preview or commit workspace-wide context for generated PDFs.
+    """Preview or commit an optional override for the current Profile context.
 
     Call first with confirm=false and show the diff to the user. Call again with
     confirm=true only after explicit approval. Every embedded or hybrid PDF then
-    receives the revisioned shared_context.json attachment automatically.
+    receives the Profile-owned context plus this revisioned override.
 
     :param shared_context_json: Complete shared context as a JSON object.
     :param expected_revision: Current revision, or 0 before initialization.
@@ -685,7 +702,7 @@ def resume_generate(
         When omitted, the saved workspace profile is used; if none exists, the
         normalized resume document is embedded instead.
     :param ai_context_mode: none, embedded, or hybrid. Hybrid embeds the profile,
-        workspace shared context, XMP discovery metadata, and a short experimental
+        Profile-owned invisible context, XMP discovery metadata, and a short experimental
         ActualText bridge. None explicitly disables both hidden JSON attachments.
     """
     return generate_payload(

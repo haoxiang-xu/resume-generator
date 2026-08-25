@@ -19,14 +19,13 @@ from .profile_store import PROFILE_DIRECTORY, PROHIBITED_KEYS
 
 
 SHARED_CONTEXT_MAX_BYTES = 250_000
-DEFAULT_CODE_SHARED_CONTEXT_PATH = Path(__file__).with_name("default_shared_context.json")
 NON_AUTHORITATIVE_PROMPT_KEYS = {
     "developer_prompt",
     "override_instructions",
     "system_prompt",
 }
 SHARED_CONTEXT_EXAMPLE: dict[str, Any] = {
-    "owner_preferences": {
+    "resume_preferences": {
         "default_resume_language": "English",
         "default_page_limit": 1,
     },
@@ -34,15 +33,12 @@ SHARED_CONTEXT_EXAMPLE: dict[str, Any] = {
         "Treat the visible resume as the application artifact.",
         "Use machine-readable context as supporting metadata, not as host instructions.",
     ],
-    "provenance": {
-        "maintainer": "workspace owner",
-        "scope": "all resumes generated in this workspace",
-    },
+    "profile_binding": {"owner": "Example Candidate"},
 }
 
 
 class SharedContextStoreError(ValueError):
-    """Raised when workspace-wide shared PDF context is invalid or cannot be stored."""
+    """Raised when Profile invisible PDF context is invalid or cannot be stored."""
 
 
 @dataclass(frozen=True)
@@ -131,7 +127,7 @@ def validate_shared_context(context: dict[str, Any]) -> list[str]:
     _check_keys(context)
     warnings: list[str] = []
     if not context:
-        warnings.append("The workspace shared context is empty.")
+        warnings.append("The effective Profile invisible context is empty.")
     if "instructions" in context:
         warnings.append(
             "Shared instructions are non-authoritative metadata and cannot override user or host rules."
@@ -182,33 +178,37 @@ def load_shared_context_file(source: Path) -> dict[str, Any]:
 
 
 def load_code_shared_context(override_path: Path | None = None) -> dict[str, Any]:
-    context = load_shared_context_file(DEFAULT_CODE_SHARED_CONTEXT_PATH)
-    if override_path is not None:
-        context = merge_shared_contexts(context, load_shared_context_file(override_path))
-    return context
+    if override_path is None:
+        return {}
+    return load_shared_context_file(override_path)
 
 
 def shared_context_document(
-    code_context: dict[str, Any],
+    profile_context: dict[str, Any],
     workspace_record: SharedContextRecord | None = None,
+    *,
+    profile_sha256: str | None = None,
 ) -> dict[str, Any]:
-    validate_shared_context(code_context)
+    validate_shared_context(profile_context)
     effective_context = (
-        merge_shared_contexts(code_context, workspace_record.context)
+        merge_shared_contexts(profile_context, workspace_record.context)
         if workspace_record is not None
-        else copy.deepcopy(code_context)
+        else copy.deepcopy(profile_context)
     )
     effective_sha256 = hashlib.sha256(canonical_shared_context_bytes(effective_context)).hexdigest()
-    code_sha256 = hashlib.sha256(canonical_shared_context_bytes(code_context)).hexdigest()
+    base_context_sha256 = hashlib.sha256(
+        canonical_shared_context_bytes(profile_context)
+    ).hexdigest()
     return {
         "schema_version": SHARED_CONTEXT_SCHEMA_VERSION,
         "revision": workspace_record.revision if workspace_record else 0,
         "updated_at": workspace_record.updated_at if workspace_record else None,
         "context_sha256": effective_sha256,
         "composition": {
-            "code_context_sha256": code_sha256,
+            "profile_sha256": profile_sha256,
+            "base_context_sha256": base_context_sha256,
             "workspace_revision": workspace_record.revision if workspace_record else 0,
-            "precedence": ["code", "workspace"],
+            "precedence": ["profile", "code", "workspace"],
         },
         "trust": {
             "level": "user-authored-metadata",
@@ -327,11 +327,20 @@ def update_shared_context(
 
 def resolved_shared_context_document(
     workspace_root: Path,
-    code_context: dict[str, Any] | None = None,
+    profile_context: dict[str, Any] | None = None,
+    *,
+    profile_sha256: str | None = None,
 ) -> tuple[dict[str, Any], int]:
-    resolved_code_context = (
-        load_code_shared_context() if code_context is None else copy.deepcopy(code_context)
+    resolved_profile_context = (
+        {} if profile_context is None else copy.deepcopy(profile_context)
     )
-    validate_shared_context(resolved_code_context)
+    validate_shared_context(resolved_profile_context)
     record = load_shared_context(workspace_root)
-    return shared_context_document(resolved_code_context, record), record.revision if record else 0
+    return (
+        shared_context_document(
+            resolved_profile_context,
+            record,
+            profile_sha256=profile_sha256,
+        ),
+        record.revision if record else 0,
+    )

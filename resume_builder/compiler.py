@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -16,10 +17,11 @@ from .ai_context import (
     AIContextManifest,
     SHARED_CONTEXT_SCHEMA_VERSION,
     add_ai_context,
+    canonical_profile_bytes,
 )
+from .profile_store import ProfileStoreError, split_profile_bundle
 from .shared_context_store import (
     SharedContextStoreError,
-    load_code_shared_context,
     merge_shared_contexts,
     shared_context_document,
 )
@@ -198,24 +200,33 @@ def compile_resume(
         if not pdf_path.exists():
             raise BuildError("LaTeX 已运行，但没有生成 PDF。")
         try:
+            profile_bundle = career_profile if career_profile is not None else data
+            embedded_profile, profile_invisible_context = split_profile_bundle(profile_bundle)
+            embedded_profile_sha256 = hashlib.sha256(
+                canonical_profile_bytes(embedded_profile)
+            ).hexdigest()
             if str(ai_context_mode).strip().lower() == "none":
                 effective_shared_context = None
             elif shared_context is None:
-                effective_shared_context = shared_context_document(load_code_shared_context())
+                effective_shared_context = shared_context_document(
+                    profile_invisible_context,
+                    profile_sha256=embedded_profile_sha256,
+                )
             elif not isinstance(shared_context, dict):
                 raise SharedContextStoreError("shared_context must be a JSON object")
             elif shared_context.get("schema_version") == SHARED_CONTEXT_SCHEMA_VERSION:
                 effective_shared_context = shared_context
             else:
                 effective_shared_context = shared_context_document(
-                    merge_shared_contexts(load_code_shared_context(), shared_context)
+                    merge_shared_contexts(profile_invisible_context, shared_context),
+                    profile_sha256=embedded_profile_sha256,
                 )
             pdf, ai_context = add_ai_context(
                 pdf_path.read_bytes(),
-                career_profile if career_profile is not None else data,
+                embedded_profile,
                 ai_context_mode,
                 shared_context=effective_shared_context,
             )
-        except (AIContextError, SharedContextStoreError) as exc:
+        except (AIContextError, ProfileStoreError, SharedContextStoreError) as exc:
             raise BuildError(f"无法写入 PDF AI 上下文：{exc}") from exc
         return BuildResult(pdf=pdf, tex=tex, log="\n".join(logs), ai_context=ai_context)

@@ -27,7 +27,7 @@ def main() -> None:
     parser.add_argument(
         "--shared-context",
         type=Path,
-        help="Optional code-level shared context JSON merged over the package default",
+        help="Optional JSON override merged over the Career Profile's invisible_context",
     )
     args = parser.parse_args()
 

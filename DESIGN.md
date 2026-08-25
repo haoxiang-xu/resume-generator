@@ -9,11 +9,11 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - `resume_generate`: writes a collision-safe PDF, LaTeX source, and canonical JSON document inside the configured workspace.
 - `resume_read_ai_context`: extracts and verifies the associated `career_profile.json` from a generated PDF.
 - `resume_profile_get`: reads the revisioned workspace Career Profile.
-- `resume_profile_update`: previews or explicitly commits a complete profile replacement.
+- `resume_profile_update`: previews or explicitly commits a Profile and its invisible context together.
 - `resume_profile_validate`: validates proposed or stored profile data without writing.
 - `resume_profile_search`: performs local transparent keyword search over profile values.
-- `resume_shared_context_get`: reads workspace-wide metadata embedded in generated PDFs.
-- `resume_shared_context_update`: previews or explicitly commits the shared context.
+- `resume_shared_context_get`: reads the current Profile's effective invisible PDF context.
+- `resume_shared_context_update`: previews or commits an optional current-Profile override.
 - `resume_generation_history`: returns recent generation provenance records.
 
 ## Boundary contracts
@@ -54,8 +54,8 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Producer: user-approved `resume_profile_update` calls.
 - Boundary: `.resume/career_profile.json` beneath `RESUME_MCP_WORKSPACE_ROOT`.
 - Consumer: profile tools and `resume_generate` when no one-off profile is supplied.
-- Canonical representation: `resume.career-profile.v1` JSON containing revision, UTC update timestamp, profile SHA-256, and a flexible profile object.
-- Admission: profile JSON must be an object under 1,000,000 bytes. Reserved fact status and visibility values are closed enums. Credential and high-risk identity-secret keys fail closed.
+- Canonical representation: `resume.career-profile.v2` JSON containing revision, UTC update timestamp, separate profile and invisible-context SHA-256 values, a flexible profile object, and its flexible `invisible_context` object. v1 records remain readable with an empty context for migration.
+- Admission: Profile creation/replacement requires both the profile object and `invisible_context`. Profile JSON must be under 1,000,000 bytes and invisible context under 250,000 bytes. Reserved fact status and visibility values are closed enums. Credential, high-risk identity-secret, and host-prompt impersonation keys fail closed.
 - Mutation: `confirm=false` returns a diff without writing. `confirm=true` writes atomically only when `expected_revision` matches the current revision.
 - Privacy: `.resume/` is ignored in this public source repository. Users may version it only in an appropriately protected workspace.
 - Failure semantics: corrupt storage, checksum mismatch, stale revision, path escape through symlinks, invalid fact fields, and sensitive keys fail closed.
@@ -68,14 +68,14 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Canonical entry: generation UUID, UTC timestamp, relative PDF path, PDF SHA-256, resume schema, section IDs, AI-context mode, embedded profile/shared-context SHA-256 values, their sources, and optional revisions.
 - Failure semantics: history failure does not invalidate an already generated PDF; it is returned as a warning.
 
-### BC-006 - workspace shared context
+### BC-006 - Profile-owned invisible context
 
-- Producer: the tracked profile-specific `resume_builder/default_shared_context.json`, an optional `RESUME_MCP_CODE_SHARED_CONTEXT_PATH` file or Python `shared_context` argument, and user-approved `resume_shared_context_update` calls.
-- Boundary: package/code context plus `.resume/shared_context.json` beneath `RESUME_MCP_WORKSPACE_ROOT`, then the PDF associated file of the same name.
+- Producer: the selected Career Profile's required `invisible_context`, an optional `RESUME_MCP_CODE_SHARED_CONTEXT_PATH` or Python `shared_context` override, and optional user-approved `resume_shared_context_update` calls.
+- Boundary: Profile record, optional overrides, then the PDF associated file `shared_context.json`.
 - Consumer: every embedded/hybrid `resume_generate` call and `resume_read_ai_context`.
 - Canonical representation: `resume.shared-context.v1` JSON with revision, UTC timestamp, context SHA-256, explicit non-authoritative trust policy, and a flexible context object limited to 250,000 bytes.
-- Composition: objects merge recursively with precedence `package default < code override < workspace`; arrays and scalar values replace lower layers. The embedded document records the code SHA-256 and workspace revision.
-- Default: before workspace initialization, generation embeds Haoxiang Xu's package profile context as revision 0. `none` mode is the only explicit opt-out from hidden attachments.
+- Composition: objects merge recursively with precedence `Profile invisible_context < code/Python override < workspace override`; arrays and scalar values replace lower layers. The embedded document records the Profile binding, context SHA-256, and workspace revision.
+- Default: unrelated Profiles never inherit a package-global context. Generation without a Profile embeds an empty revision-0 context only to preserve the attachment contract. `none` mode is the explicit opt-out from all hidden attachments.
 - Mutation: preview by default; `confirm=true` plus matching `expected_revision` commits atomically.
 - Safety: credential keys, identity-secret keys, and fields masquerading as system/developer prompts fail closed. Shared metadata cannot override host or user instructions.
 
@@ -89,19 +89,19 @@ This MCP lets an AI choose resume section names, order, count, and content while
 4. Restart preserves collision behavior because the workspace files are the source of truth.
 5. No retry or resume operation overwrites an existing artifact.
 
-### SEQ-002 - profile update and generation
+### SEQ-002 - Profile and invisible-context update
 
 1. `resume_profile_get` returns revision 0 when no profile exists.
-2. `resume_profile_update(confirm=false)` validates and previews revision 1 without writing.
+2. `resume_profile_update(confirm=false)` requires both Profile data and `invisible_context`, then previews revision 1 without writing.
 3. After user approval, the same call with `confirm=true` atomically commits revision 1.
 4. A later update must supply revision 1; stale revision 0 is rejected.
-5. `resume_generate` embeds the saved profile record and logs revision 1 in generation history.
+5. `resume_generate` embeds the saved Profile record as `career_profile.json`, its bound context as `shared_context.json`, and logs revision 1.
 
 ### SEQ-003 - shared context propagation
 
-1. Before workspace initialization, `resume_shared_context_get` returns the effective code-composed revision 0 document.
-2. Preview and confirmed update create revision 1 under `.resume/shared_context.json`.
-3. Every subsequent embedded/hybrid PDF carries that exact revision as a separate associated file.
+1. Profile creation stores `invisible_context` in the same revisioned Profile document.
+2. An optional previewed and confirmed override may create revision 1 under `.resume/shared_context.json`.
+3. Every subsequent embedded/hybrid PDF carries the selected Profile context plus optional overrides as a separate associated file.
 4. XMP, PDF metadata, `/ActualText`, generation history, and the MCP result expose its SHA-256 and revision.
 5. `none` mode carries no hidden files and logs the shared context as disabled.
 
@@ -121,11 +121,11 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-012: stale profile revisions and sensitive credential keys fail closed.
 - AC-013: profile search returns matching JSON paths without external services.
 - AC-014: generation automatically uses the saved profile and records its revision.
-- AC-015: every embedded/hybrid PDF contains `shared_context.json`, including code-composed revision 0 before workspace initialization.
+- AC-015: every embedded/hybrid PDF contains `shared_context.json`; no Profile means an empty revision-0 attachment rather than a global candidate context.
 - AC-016: a committed shared-context revision propagates identically to repeated generations.
 - AC-017: `none` mode omits both JSON attachments and the `/ActualText` bridge.
-- AC-018: Python, CLI, and MCP code-file overrides merge over the tracked package default.
-- AC-019: workspace shared context recursively overrides code-level values in the embedded document.
+- AC-018: each Profile creation requires and stores its own `invisible_context`; two different Profiles produce two different context attachments.
+- AC-019: Python, CLI, MCP code-file, and workspace overrides recursively merge over the selected Profile context.
 
 ## Current renderer constraint
 

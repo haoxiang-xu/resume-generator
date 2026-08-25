@@ -60,7 +60,7 @@ def test_shared_context_rejects_host_prompt_impersonation(tmp_path) -> None:
         )
 
 
-def test_python_api_merges_code_context_over_package_default() -> None:
+def test_python_api_uses_explicit_context_without_global_default() -> None:
     result = compile_resume(
         EXAMPLE_DOCUMENT,
         template_name="flexible.tex.j2",
@@ -69,25 +69,29 @@ def test_python_api_merges_code_context_over_package_default() -> None:
     _, shared_context, _ = read_ai_context_files(result.pdf)
 
     assert shared_context is not None
-    assert shared_context["context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
+    assert set(shared_context["context"]) == {"code_layer"}
     assert shared_context["context"]["code_layer"]["enabled"] is True
 
 
-def test_package_code_shared_context_is_embedded_by_default(tmp_path, monkeypatch) -> None:
+def test_generation_without_profile_has_no_global_context(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RESUME_MCP_WORKSPACE_ROOT", str(tmp_path))
 
     generated = generate_payload(json.dumps(EXAMPLE_DOCUMENT), "default-shared", "artifacts")
     extracted = read_ai_context_payload(generated["pdf_path"])
 
     assert generated["ok"] is True
-    assert generated["shared_context_source"] == "code"
+    assert generated["shared_context_source"] == "empty"
     assert generated["shared_context_revision"] == 0
     assert generated["ai_context"]["shared_context_filename"] == SHARED_CONTEXT_FILENAME
     assert extracted["ok"] is True
     assert extracted["shared_context"]["schema_version"] == SHARED_CONTEXT_SCHEMA_VERSION
     assert extracted["shared_context"]["revision"] == 0
-    assert extracted["shared_context"]["context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
-    assert extracted["shared_context"]["composition"]["precedence"] == ["code", "workspace"]
+    assert extracted["shared_context"]["context"] == {}
+    assert extracted["shared_context"]["composition"]["precedence"] == [
+        "profile",
+        "code",
+        "workspace",
+    ]
 
 
 def test_saved_shared_context_is_embedded_in_every_pdf(tmp_path, monkeypatch) -> None:
@@ -106,14 +110,13 @@ def test_saved_shared_context_is_embedded_in_every_pdf(tmp_path, monkeypatch) ->
     second = generate_payload(json.dumps(EXAMPLE_DOCUMENT), "shared-second", "artifacts")
 
     for generated in (first, second):
-        assert generated["shared_context_source"] == "code+workspace"
+        assert generated["shared_context_source"] == "workspace"
         assert generated["shared_context_revision"] == 1
         extracted = read_ai_context_payload(generated["pdf_path"])
         assert extracted["shared_context"]["revision"] == 1
         assert extracted["shared_context"]["context"]["owner_preferences"] == SHARED_CONTEXT[
             "owner_preferences"
         ]
-        assert extracted["shared_context"]["context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
 
 
 def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> None:
@@ -131,7 +134,6 @@ def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> No
     monkeypatch.setenv("RESUME_MCP_CODE_SHARED_CONTEXT_PATH", str(override))
 
     initial = shared_context_get_payload()
-    assert initial["code_context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
     assert initial["code_context"]["profile"]["target_role"] == "AI Engineer"
     assert initial["effective_document"]["context"]["owner_preferences"][
         "default_resume_language"
@@ -146,6 +148,40 @@ def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> No
     assert extracted["shared_context"]["context"]["owner_preferences"][
         "default_resume_language"
     ] == "English"
+
+
+def test_each_provided_profile_owns_its_invisible_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RESUME_MCP_WORKSPACE_ROOT", str(tmp_path))
+    first_profile = {
+        "basics": {"name": "First Candidate"},
+        "invisible_context": {"profile_owner": "First Candidate", "target": "Platform"},
+    }
+    second_profile = {
+        "basics": {"name": "Second Candidate"},
+        "invisible_context": {"profile_owner": "Second Candidate", "target": "Research"},
+    }
+
+    first = generate_payload(
+        json.dumps(EXAMPLE_DOCUMENT),
+        "first-profile",
+        "artifacts",
+        json.dumps(first_profile),
+    )
+    second = generate_payload(
+        json.dumps(EXAMPLE_DOCUMENT),
+        "second-profile",
+        "artifacts",
+        json.dumps(second_profile),
+    )
+    first_extracted = read_ai_context_payload(first["pdf_path"])
+    second_extracted = read_ai_context_payload(second["pdf_path"])
+
+    assert first["shared_context_source"] == "profile"
+    assert second["shared_context_source"] == "profile"
+    assert first_extracted["shared_context"]["context"] == first_profile["invisible_context"]
+    assert second_extracted["shared_context"]["context"] == second_profile["invisible_context"]
+    assert "invisible_context" not in first_extracted["career_profile"]
+    assert "invisible_context" not in second_extracted["career_profile"]
 
 
 def test_none_mode_omits_shared_context_and_profile(tmp_path, monkeypatch) -> None:
