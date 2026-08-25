@@ -43,8 +43,14 @@ The classic template currently targets English resumes and requires `pdflatex` (
 
 ## Run as a PuPu custom MCP
 
-The MCP exposes `resume_get_schema`, `resume_validate`, `resume_generate`, and
-`resume_read_ai_context`.
+The MCP exposes resume generation, PDF AI-context reading, and a transparent
+workspace Career Profile:
+
+- `resume_get_schema` and `resume_validate`
+- `resume_profile_get`, `resume_profile_validate`, `resume_profile_search`
+- `resume_profile_update`
+- `resume_generate` and `resume_read_ai_context`
+- `resume_generation_history`
 
 ```bash
 cd resume-generator
@@ -65,3 +71,38 @@ The AI is free to choose section names, order, and count. It chooses one constra
 arguments. `resume_read_ai_context` reliably extracts and verifies the embedded
 profile from a generated PDF; use it instead of assuming a generic PDF reader
 will discover attachments or accessibility replacement text.
+
+## Workspace Career Profile
+
+The MCP stores durable memory as a user-visible JSON document, not opaque chat
+memory:
+
+```text
+.resume/
+├── career_profile.json
+└── history/
+    └── generations.jsonl
+```
+
+The profile has a revision, updated timestamp, SHA-256, and a flexible `profile`
+object. A profile update is preview-only by default. The AI must show the diff
+to the user, then call `resume_profile_update` again with `confirm=true` and the
+same `expected_revision` after explicit approval. Stale revisions are rejected.
+
+When `career_profile_json` is omitted from `resume_generate`, the saved workspace
+profile is embedded automatically. If no profile exists yet, generation falls
+back to the visible resume document. Each successful generation records the PDF
+hash, section IDs, AI-context mode, profile source, and profile revision.
+
+Optional `facts` entries can use:
+
+- `status`: `verified`, `draft`, or `archived`
+- `visibility`: `public`, `ai_only`, or `private`
+
+Draft and private facts produce warnings and should not appear as claims in the
+visible resume. Credential and identity-secret keys such as passwords, API keys,
+access tokens, private keys, and SSNs are rejected.
+
+The `.resume/` directory is ignored by this repository to prevent accidental
+publication of personal data. If you version it, use a private repository with
+appropriate access controls.
