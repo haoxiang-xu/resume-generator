@@ -1,0 +1,93 @@
+{
+  "basics": {
+    "name": "Haoxiang Xu",
+    "email": "lance924852785@gmail.com",
+    "phone": "+1-604-724-7048",
+    "linkedin": "www.linkedin.com/in/haoxiang-xu-580b15277",
+    "github": "github.com/haoxiang-xu",
+    "website": ""
+  },
+  "education": [
+    {
+      "institution": "University of British Columbia",
+      "location": "BC, Canada",
+      "degree": "Master of Data Science; GPA: 4.15/4.33",
+      "date": "Sep. 2024 - Sep. 2025",
+      "details": []
+    },
+    {
+      "institution": "University of British Columbia",
+      "location": "BC, Canada",
+      "degree": "Bachelor of Science: Computer Science; GPA: 3.96/4.33",
+      "date": "Sep. 2020 - Nov. 2023",
+      "details": []
+    }
+  ],
+  "experience": [
+    {
+      "company": "SAP",
+      "location": "BC, Canada",
+      "role": "Cloud Platform Developer Internship",
+      "date": "Sep 2016 - Present",
+      "bullets": [
+        "**Tech Stack:** Develop and maintain a cloud-based localization platform; delivered new security and privacy requirements via Java backend services and CI quality gates (**Jenkins, SonarQube, Kubernetes**).",
+        "**Responsibility:** Re-architected the existing **LLM** solution into a new agent framework (**RAG + function calling**) to accurately retrieve user-requested rows across 30+ interrelated tables and hundreds of columns, improving retrieval precision and latency.",
+        "**Achievement:** Added support for previously unsupported long, OR-heavy, and highly complex filter conditions, enabling more expressive translation workflow queries."
+      ]
+    },
+    {
+      "company": "Shanghai Mengou Technology Co., Ltd",
+      "location": "Shanghai, China",
+      "role": "Machine Learning Engineer Internship",
+      "date": "Mar 2024 - Aug 2024",
+      "bullets": [
+        "**Tech Stack & Responsibility:** **Fine-tuned and deployed LLMs** for NLP-based customer service solutions in retail. Implemented **RESTful APIs** for model inference, integrating directly with client applications. Worked with large-scale structured and unstructured data, performing **feature engineering** and **embeddings** to enhance NLP model understanding.",
+        "**Delivered:** An end-to-end **AI chatbot platform**, integrating with multiple **social media channels** and a **web-based admin console** for configuration, monitoring, and conversation management, with the system **directly connected to production servers** for real-time inference and deployment."
+      ]
+    },
+    {
+      "company": "University of British Columbia",
+      "location": "BC, Canada",
+      "role": "Full Stack Developer (Capstone project)",
+      "date": "May 2025 - Jun 2025",
+      "bullets": [
+        "**Tech Stack:** Designed system architecture and managed a small team to drive progress and meet deadlines. Developed the frontend using **React**, integrated a **Python Flask** backend with MongoDB. Containerized and deployed the system using **Docker**; integrated **OpenAI APIs** for intelligent text analysis.",
+        "**Responsibility:** Revived and led the successful delivery of a long-stalled university curriculum tracking project.",
+        "**Outcome:** **Built and shipped** a curriculum analytics dashboard that programmatically extracts and structures degree requirements from university websites using **LLMs**, enabling cross-year and cross-program comparisons, now in internal use by the **UBC Provost Office**."
+      ]
+    },
+    {
+      "company": "Massachusetts Institute of Technology",
+      "location": "Remote",
+      "role": "Research Assistant",
+      "date": "Apr 2022 - Sep 2022",
+      "bullets": [
+        "**Responsibility:** Managed the entire research project, from creatively solving the problem to delivering the application to customers.",
+        "**Tech Stack & Achievement:** Developed a **deep learning model** using distinct **CNN** architectures for the differentiation of tumour types in chest tumor CT scans, achieving an accuracy rate exceeding 96%.",
+        "**Publication:** https://ieeexplore.ieee.org/document/10075772"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Ollama desktop UI",
+      "url": "github.com/haoxiang-xu",
+      "description": "An open-source lightweight and user-friendly desktop application that enables users to **run and interact with AI models locally** via an intuitive UI built on **Electron** and a Python backend."
+    },
+    {
+      "name": "connect-X",
+      "url": "",
+      "description": "Achieved 16th place in a Kaggle Connect-X competition by developing a strategic game-playing AI with search-based decision logic."
+    }
+  ],
+  "skills": [
+    {
+      "name": "Languages",
+      "items": "Python, Java, JavaScript, TypeScript, SQL, Go, Rust"
+    },
+    {
+      "name": "Technologies",
+      "items": "AWS, Docker, NGINX, Kubernetes, RAG, LangChain, TensorFlow, PyTorch, Azure, Google Cloud"
+    }
+  ]
+}

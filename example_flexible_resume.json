@@ -1,0 +1,119 @@
+{
+  "schema_version": "resume.document.v1",
+  "basics": {
+    "name": "Haoxiang Xu",
+    "headline": "Cloud Platform Developer and Applied AI Engineer",
+    "contacts": [
+      {
+        "label": "Email",
+        "value": "lance924852785@gmail.com",
+        "url": "mailto:lance924852785@gmail.com"
+      },
+      {
+        "label": "LinkedIn",
+        "value": "linkedin.com/in/haoxiang-xu-580b15277",
+        "url": "https://www.linkedin.com/in/haoxiang-xu-580b15277"
+      },
+      {
+        "label": "GitHub",
+        "value": "github.com/haoxiang-xu",
+        "url": "https://github.com/haoxiang-xu"
+      }
+    ]
+  },
+  "sections": [
+    {
+      "id": "profile",
+      "title": "Profile",
+      "layout": "paragraphs",
+      "paragraphs": [
+        "Cloud platform developer focused on **LLM agents, retrieval systems, and production AI infrastructure**, with experience delivering systems across enterprise and academic environments."
+      ]
+    },
+    {
+      "id": "education",
+      "title": "Education",
+      "layout": "entries",
+      "entries": [
+        {
+          "primary": "University of British Columbia",
+          "secondary": "Master of Data Science; GPA: 4.15/4.33",
+          "aside_top": "BC, Canada",
+          "aside_bottom": "Sep. 2024 - Sep. 2025",
+          "link": "https://www.ubc.ca",
+          "bullets": []
+        },
+        {
+          "primary": "University of British Columbia",
+          "secondary": "Bachelor of Science: Computer Science; GPA: 3.96/4.33",
+          "aside_top": "BC, Canada",
+          "aside_bottom": "Sep. 2020 - Nov. 2023",
+          "link": "https://www.ubc.ca",
+          "bullets": []
+        }
+      ]
+    },
+    {
+      "id": "selected_impact",
+      "title": "Selected Impact",
+      "layout": "entries",
+      "entries": [
+        {
+          "primary": "SAP",
+          "secondary": "Cloud Platform Developer Internship",
+          "aside_top": "BC, Canada",
+          "aside_bottom": "2025 - Present",
+          "link": "https://www.sap.com",
+          "bullets": [
+            "Re-architected an existing LLM solution into an agent framework using **RAG and function calling** across 30+ related tables.",
+            "Added support for long, OR-heavy, and complex filters while improving retrieval precision and latency."
+          ]
+        },
+        {
+          "primary": "University of British Columbia",
+          "secondary": "Full Stack Developer, Capstone Project",
+          "aside_top": "BC, Canada",
+          "aside_bottom": "May 2025 - Jun. 2025",
+          "link": "https://www.ubc.ca",
+          "bullets": [
+            "Led delivery of a curriculum analytics dashboard using **React, Flask, MongoDB, Docker, and OpenAI APIs**.",
+            "Shipped an LLM-based requirements extraction workflow now used internally by the UBC Provost Office."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "additional_highlights",
+      "title": "Additional Highlights",
+      "layout": "bullet_list",
+      "bullets": [
+        "Built an open-source **Ollama desktop UI** with Electron and a Python backend.",
+        "Achieved 16th place in a Kaggle Connect-X competition with a search-based game-playing agent.",
+        "Published chest CT tumour classification research with model accuracy above 96%."
+      ]
+    },
+    {
+      "id": "technical_foundation",
+      "title": "Technical Foundation",
+      "layout": "compact_rows",
+      "rows": [
+        {
+          "label": "Languages",
+          "content": "Python, Java, JavaScript, TypeScript, SQL, Go, Rust",
+          "link": ""
+        },
+        {
+          "label": "Platforms",
+          "content": "AWS, Docker, NGINX, Kubernetes, RAG, LangChain, TensorFlow, PyTorch, Azure, Google Cloud",
+          "link": ""
+        }
+      ]
+    }
+  ],
+  "render": {
+    "template": "classic",
+    "paper_size": "letter",
+    "max_pages": 1,
+    "density": "compact"
+  }
+}

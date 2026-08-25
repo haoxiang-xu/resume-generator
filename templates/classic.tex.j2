@@ -1,0 +1,111 @@
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+
+\hypersetup{hidelinks,pdfauthor={(( resume.basics.name|tex ))},pdftitle={(( resume.basics.name|tex )) Resume}}
+\urlstyle{same}
+\pagestyle{empty}
+
+\setlength{\oddsidemargin}{-0.05in}
+\setlength{\evensidemargin}{-0.05in}
+\setlength{\textwidth}{6.6in}
+\setlength{\topmargin}{-0.58in}
+\setlength{\textheight}{10.05in}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{0pt}
+\raggedbottom
+\raggedright
+
+\newcommand{\resumeSection}[1]{%
+  \vspace{5pt}{\large\scshape #1}\vspace{2pt}\par\hrule\vspace{4pt}
+}
+
+\newenvironment{resumeEntries}{%
+  \begin{list}{$\bullet$}{%
+    \setlength{\leftmargin}{0.14in}%
+    \setlength{\labelwidth}{0.08in}%
+    \setlength{\labelsep}{0.04in}%
+    \setlength{\itemsep}{5pt}%
+    \setlength{\parsep}{0pt}%
+    \setlength{\topsep}{0pt}%
+  }%
+}{\end{list}}
+
+\newenvironment{resumeBullets}{%
+  \begin{list}{$\circ$}{%
+    \setlength{\leftmargin}{0.24in}%
+    \setlength{\labelwidth}{0.10in}%
+    \setlength{\labelsep}{0.05in}%
+    \setlength{\itemsep}{1pt}%
+    \setlength{\parsep}{0pt}%
+    \setlength{\topsep}{2pt}%
+  }%
+}{\end{list}}
+
+\newcommand{\resumeHeading}[4]{%
+  \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lr}
+    \textbf{#1} & #2 \\
+    \textit{#3} & \textit{#4} \\
+  \end{tabular*}\vspace{-2pt}
+}
+
+\begin{document}
+\fontsize{9.6pt}{11.2pt}\selectfont
+
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lr}
+  {\Large\textbf{(( resume.basics.name|tex ))}} &
+  ((* if resume.basics.email *))\href{(( link_target(resume.basics.email, 'email')|url ))}{Email: (( resume.basics.email|tex ))}((* endif *)) \\
+  ((* if resume.basics.linkedin *))\href{(( link_target(resume.basics.linkedin)|url ))}{LinkedIn: (( resume.basics.linkedin|tex ))}((* endif *)) &
+  ((* if resume.basics.phone *))\href{(( link_target(resume.basics.phone, 'phone')|url ))}{Mobile: (( resume.basics.phone|tex ))}((* endif *)) \\
+  ((* if resume.basics.github *))\href{(( link_target(resume.basics.github)|url ))}{Github: (( resume.basics.github|tex ))}((* endif *)) &
+  ((* if resume.basics.website *))\href{(( link_target(resume.basics.website)|url ))}{(( resume.basics.website|tex ))}((* endif *))
+\end{tabular*}
+
+((* if resume.education *))
+\resumeSection{Education}
+\begin{resumeEntries}
+((* for item in resume.education *))
+  \item \resumeHeading{(( item.institution|tex ))}{(( item.location|tex ))}{(( item.degree|inline ))}{(( item.date|tex ))}
+  ((* if item.details *))
+  \begin{resumeBullets}
+  ((* for bullet in item.details *))\item (( bullet|inline ))
+  ((* endfor *))
+  \end{resumeBullets}
+  ((* endif *))
+((* endfor *))
+\end{resumeEntries}
+((* endif *))
+
+((* if resume.experience *))
+\resumeSection{Experience}
+\begin{resumeEntries}
+((* for item in resume.experience *))
+  \item \resumeHeading{(( item.company|tex ))}{(( item.location|tex ))}{(( item.role|tex ))}{(( item.date|tex ))}
+  ((* if item.bullets *))
+  \begin{resumeBullets}
+  ((* for bullet in item.bullets *))\item (( bullet|inline ))
+  ((* endfor *))
+  \end{resumeBullets}
+  ((* endif *))
+((* endfor *))
+\end{resumeEntries}
+((* endif *))
+
+((* if resume.projects *))
+\resumeSection{Projects}
+\begin{resumeEntries}
+((* for item in resume.projects *))
+  \item ((* if item.url *))\href{(( link_target(item.url)|url ))}{\textbf{(( item.name|tex ))}}((* else *))\textbf{(( item.name|tex ))}((* endif *)): (( item.description|inline ))
+((* endfor *))
+\end{resumeEntries}
+((* endif *))
+
+((* if resume.skills *))
+\resumeSection{Programming Skills}
+\begin{resumeEntries}
+  \item ((* for group in resume.skills *))\textbf{(( group.name|tex ))}: (( group["items"]|tex ))((* if not loop.last *))\quad((* endif *))((* endfor *))
+\end{resumeEntries}
+((* endif *))
+
+\end{document}

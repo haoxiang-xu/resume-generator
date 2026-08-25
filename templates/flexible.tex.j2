@@ -1,0 +1,101 @@
+\documentclass[10pt,((* if resume.render.paper_size == "a4" *))a4paper((* else *))letterpaper((* endif *))]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+
+\hypersetup{hidelinks,pdfauthor={(( resume.basics.name|tex ))},pdftitle={(( resume.basics.name|tex )) Resume}}
+\urlstyle{same}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{0pt}
+\raggedbottom
+\raggedright
+
+((* if resume.render.density == "compact" *))
+\setlength{\oddsidemargin}{-0.05in}
+\setlength{\evensidemargin}{-0.05in}
+\setlength{\textwidth}{6.6in}
+\setlength{\topmargin}{-0.58in}
+\setlength{\textheight}{10.05in}
+\newcommand{\resumeBodySize}{\fontsize{9.6pt}{11.2pt}\selectfont}
+((* elif resume.render.density == "relaxed" *))
+\setlength{\oddsidemargin}{0.05in}
+\setlength{\evensidemargin}{0.05in}
+\setlength{\textwidth}{6.4in}
+\setlength{\topmargin}{-0.40in}
+\setlength{\textheight}{9.70in}
+\newcommand{\resumeBodySize}{\fontsize{10.2pt}{12.2pt}\selectfont}
+((* else *))
+\setlength{\oddsidemargin}{0in}
+\setlength{\evensidemargin}{0in}
+\setlength{\textwidth}{6.5in}
+\setlength{\topmargin}{-0.50in}
+\setlength{\textheight}{9.90in}
+\newcommand{\resumeBodySize}{\fontsize{9.9pt}{11.6pt}\selectfont}
+((* endif *))
+
+\newcommand{\resumeSection}[1]{%
+  \vspace{5pt}{\large\scshape #1}\vspace{2pt}\par\hrule\vspace{4pt}
+}
+\newenvironment{resumeEntries}{%
+  \begin{list}{$\bullet$}{%
+    \setlength{\leftmargin}{0.14in}\setlength{\labelwidth}{0.08in}%
+    \setlength{\labelsep}{0.04in}\setlength{\itemsep}{5pt}%
+    \setlength{\parsep}{0pt}\setlength{\topsep}{0pt}%
+  }%
+}{\end{list}}
+\newenvironment{resumeBullets}{%
+  \begin{list}{$\circ$}{%
+    \setlength{\leftmargin}{0.24in}\setlength{\labelwidth}{0.10in}%
+    \setlength{\labelsep}{0.05in}\setlength{\itemsep}{1pt}%
+    \setlength{\parsep}{0pt}\setlength{\topsep}{2pt}%
+  }%
+}{\end{list}}
+\newcommand{\resumeHeading}[4]{%
+  \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lr}
+    \textbf{#1} & #2 \\
+    \textit{#3} & \textit{#4} \\
+  \end{tabular*}\vspace{-2pt}
+}
+
+\begin{document}
+\resumeBodySize
+
+{\Large\textbf{(( resume.basics.name|tex ))}}((* if resume.basics.headline *))\hfill (( resume.basics.headline|tex ))((* endif *))\\
+((* for contact in resume.basics.contacts *))
+((* if contact.url *))\href{(( contact.url|url ))}{(( contact.label|tex )): (( contact.value|tex ))}((* else *))(( contact.label|tex )): (( contact.value|tex ))((* endif *))((* if not loop.last *))\quad $\vert$ \quad((* endif *))
+((* endfor *))
+\par\vspace{2pt}
+
+((* for section in resume.sections *))
+\resumeSection{(( section.title|tex ))}
+((* if section.layout == "entries" *))
+\begin{resumeEntries}
+((* for item in section.entries *))
+  \item \resumeHeading{((* if item.link *))\href{(( item.link|url ))}{(( item.primary|tex ))}((* else *))(( item.primary|tex ))((* endif *))}{(( item.aside_top|tex ))}{(( item.secondary|inline ))}{(( item.aside_bottom|tex ))}
+  ((* if item.bullets *))
+  \begin{resumeBullets}
+  ((* for bullet in item.bullets *))\item (( bullet|inline ))
+  ((* endfor *))
+  \end{resumeBullets}
+  ((* endif *))
+((* endfor *))
+\end{resumeEntries}
+((* elif section.layout == "compact_rows" *))
+\begin{resumeEntries}
+((* for row in section.rows *))
+  \item \textbf{(( row.label|tex ))}: ((* if row.link *))\href{(( row.link|url ))}{(( row.content|inline ))}((* else *))(( row.content|inline ))((* endif *))
+((* endfor *))
+\end{resumeEntries}
+((* elif section.layout == "paragraphs" *))
+((* for paragraph in section.paragraphs *))(( paragraph|inline ))\par\vspace{3pt}
+((* endfor *))
+((* else *))
+\begin{resumeEntries}
+((* for bullet in section.bullets *))\item (( bullet|inline ))
+((* endfor *))
+\end{resumeEntries}
+((* endif *))
+((* endfor *))
+
+\end{document}
