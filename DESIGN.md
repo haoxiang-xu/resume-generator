@@ -84,8 +84,8 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Producer: the `BuildResult` returned by `compile_resume` in `app.py`.
 - Boundary: one local Streamlit page after an explicit generation action.
 - Consumer: a user comparing final output with its compiler input.
-- Representation: equal-width, independently scrolling panels with the rendered PDF on the left and the exact, unmodified `BuildResult.tex` on the right.
-- Actions: PDF and `.tex` downloads remain separate; the source panel is read-only and includes line numbers and copy support.
+- Representation: equal-width, independently scrolling panels with the rendered PDF on the left. The right panel has `Raw LaTeX` and `Watermark JSON` tabs containing the exact, unmodified `BuildResult.tex` and the actual embedded `shared_context.json` respectively.
+- Actions: PDF, `.tex`, and Watermark JSON downloads remain separate; both text views are read-only and include line numbers and copy support. The Watermark tab reuses the PDF reader and displays its binding-verification status.
 - Failure semantics: compilation errors are shown without replacing the last successful result.
 
 ## Sequence contract
