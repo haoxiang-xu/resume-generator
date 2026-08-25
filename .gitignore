@@ -1,7 +1,10 @@
 .venv/
 __pycache__/
 .pytest_cache/
+dist/
 output/
+tmp/
+*.egg-info/
 *.aux
 *.fdb_latexmk
 *.fls

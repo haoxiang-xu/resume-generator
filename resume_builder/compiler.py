@@ -10,6 +10,13 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from .ai_context import (
+    DEFAULT_AI_CONTEXT_MODE,
+    AIContextError,
+    AIContextManifest,
+    add_ai_context,
+)
+
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -23,6 +30,7 @@ class BuildResult:
     pdf: bytes
     tex: str
     log: str
+    ai_context: AIContextManifest
 
 
 LATEX_ESCAPES = {
@@ -135,6 +143,9 @@ def render_latex(data: dict[str, Any], template_name: str = "classic.tex.j2") ->
 def compile_resume(
     data: dict[str, Any],
     template_name: str = "classic.tex.j2",
+    *,
+    career_profile: dict[str, Any] | None = None,
+    ai_context_mode: str = DEFAULT_AI_CONTEXT_MODE,
 ) -> BuildResult:
     tex = render_latex(data, template_name=template_name)
     engine = shutil.which("pdflatex")
@@ -176,4 +187,12 @@ def compile_resume(
         pdf_path = temp_dir / "resume.pdf"
         if not pdf_path.exists():
             raise BuildError("LaTeX 已运行，但没有生成 PDF。")
-        return BuildResult(pdf=pdf_path.read_bytes(), tex=tex, log="\n".join(logs))
+        try:
+            pdf, ai_context = add_ai_context(
+                pdf_path.read_bytes(),
+                career_profile if career_profile is not None else data,
+                ai_context_mode,
+            )
+        except AIContextError as exc:
+            raise BuildError(f"无法写入 PDF AI 上下文：{exc}") from exc
+        return BuildResult(pdf=pdf, tex=tex, log="\n".join(logs), ai_context=ai_context)

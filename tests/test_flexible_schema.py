@@ -58,6 +58,9 @@ def test_generate_is_collision_safe(tmp_path, monkeypatch) -> None:
     assert len(first["pdf_sha256"]) == 64
     assert len(second["pdf_sha256"]) == 64
     assert first["page_count"] == 1
+    assert first["ai_context"]["mode"] == "hybrid"
+    assert first["ai_context"]["profile_filename"] == "career_profile.json"
+    assert first["ai_context"]["actual_text_bridge"] is True
 
 
 def test_validate_does_not_write_files(tmp_path, monkeypatch) -> None:

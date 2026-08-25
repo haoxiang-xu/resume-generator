@@ -7,6 +7,7 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - `resume_get_schema`: returns the versioned JSON Schema, supported layouts, and an example.
 - `resume_validate`: validates and normalizes `resume.document.v1` without writing files.
 - `resume_generate`: writes a collision-safe PDF, LaTeX source, and canonical JSON document inside the configured workspace.
+- `resume_read_ai_context`: extracts and verifies the associated `career_profile.json` from a generated PDF.
 
 ## Boundary contracts
 
@@ -30,6 +31,17 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Existing files are never overwritten. Writes use a temporary sibling and atomic replace.
 - Failure semantics: no successful result is returned unless all three output writes complete. A future transaction/cleanup refinement may remove earlier siblings if a later write fails.
 
+### BC-003 - machine-readable career profile in PDF
+
+- Producer: optional `career_profile_json` passed to `resume_generate`; when omitted, the normalized visible resume document is used.
+- Boundary: PDF embedded-file name tree plus document-level `/AF`, XMP metadata, and optional marked content.
+- Consumer: `resume_read_ai_context`, PDF attachment tools, or generic text extractors.
+- Canonical representation: UTF-8 JSON object serialized with sorted keys and a trailing newline as `career_profile.json`, limited to 1,000,000 bytes.
+- Integrity: the canonical profile SHA-256 is recorded in PDF metadata and XMP; the embedded-file checksum uses the PDF-defined MD5 field. Reads fail if the SHA-256 does not match.
+- Modes: `none`, `embedded`, and `hybrid`. `hybrid` adds a short invisible `/ActualText` discovery bridge containing only the attachment name and SHA-256, never the complete profile.
+- Accessibility warning: the bridge is intentionally experimental and is not claimed to conform to PDF/UA. Screen readers, copy/paste, ATS tools, and text extractors may expose it.
+- Failure semantics: malformed JSON, non-object JSON, oversize profiles, unsupported modes, missing attachments, and integrity mismatches fail closed.
+
 ## Sequence contract
 
 ### SEQ-001 - repeated generation
@@ -47,8 +59,11 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-003: absolute paths and `..` escapes fail at BC-002.
 - AC-004: repeated generation creates a numeric suffix and preserves the first artifact.
 - AC-005: `resume_validate` performs no filesystem writes.
-- AC-006: a real MCP stdio client can list and call all three tools.
+- AC-006: a real MCP stdio client can list and call all four tools.
 - AC-007: the rendered PDF is visually inspected after every meaningful template change.
+- AC-008: embedded and hybrid PDFs round-trip `career_profile.json` with a verified SHA-256.
+- AC-009: hybrid is discoverable through `/ActualText`; embedded mode contains no `/ActualText` bridge.
+- AC-010: the AI context layer does not change the rendered appearance of the resume.
 
 ## Current renderer constraint
 

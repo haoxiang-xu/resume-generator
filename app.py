@@ -7,7 +7,7 @@ from typing import Any
 
 import streamlit as st
 
-from resume_builder import BuildError, compile_resume
+from resume_builder import AI_CONTEXT_MODES, BuildError, compile_resume
 
 
 ROOT = Path(__file__).resolve().parent
@@ -92,6 +92,22 @@ with st.sidebar:
     if st.button("恢复示例内容", use_container_width=True):
         reset_resume(EXAMPLE)
         st.rerun()
+
+    st.divider()
+    st.subheader("AI 上下文")
+    ai_context_mode = st.selectbox(
+        "PDF 上下文模式",
+        AI_CONTEXT_MODES,
+        index=AI_CONTEXT_MODES.index("hybrid"),
+        help="hybrid 会嵌入 JSON、写入 XMP，并添加一段实验性的 ActualText 发现提示。",
+    )
+    profile_upload = st.file_uploader(
+        "扩展职业档案（可选）",
+        type=["json"],
+        key="career_profile_upload",
+        help="未提供时，将当前简历 JSON 作为 career_profile.json 嵌入。",
+    )
+    st.caption("ActualText 可能被屏幕阅读器或复制操作读出，不应放入虚假或敏感信息。")
 
     st.divider()
     st.info("当前经典模板适合英文技术简历。PDF 在本机生成，内容不会上传到外部服务。")
@@ -202,13 +218,29 @@ with note_col:
 if generate:
     try:
         with st.spinner("正在编译 LaTeX..."):
-            st.session_state.pdf_result = compile_resume(resume)
-    except BuildError as exc:
+            career_profile = (
+                json.loads(profile_upload.getvalue().decode("utf-8"))
+                if profile_upload is not None
+                else resume
+            )
+            if not isinstance(career_profile, dict):
+                raise ValueError("扩展职业档案必须是 JSON object")
+            st.session_state.pdf_result = compile_resume(
+                resume,
+                career_profile=career_profile,
+                ai_context_mode=ai_context_mode,
+            )
+    except (BuildError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         st.error(str(exc))
 
 result = st.session_state.get("pdf_result")
 if result:
     st.success("PDF 已生成")
+    if result.ai_context.filename:
+        st.caption(
+            f"AI 上下文：{result.ai_context.mode} · {result.ai_context.filename} · "
+            f"{result.ai_context.profile_size} bytes"
+        )
     download_col, source_col = st.columns(2)
     with download_col:
         st.download_button(

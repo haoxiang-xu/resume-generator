@@ -11,6 +11,13 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from pypdf import PdfReader
 
+from .ai_context import (
+    AI_CONTEXT_MODES,
+    DEFAULT_AI_CONTEXT_MODE,
+    AIContextError,
+    parse_profile_json,
+    read_embedded_profile,
+)
 from .compiler import BuildError, compile_resume, render_latex
 from .flexible_schema import (
     DOCUMENT_SCHEMA,
@@ -44,6 +51,21 @@ def _output_directory(relative_directory: str) -> Path:
     if not destination.is_relative_to(root):
         raise ResumeSchemaError("output_directory escapes the configured workspace")
     return destination
+
+
+def _workspace_file(file_path: str) -> Path:
+    if not isinstance(file_path, str) or not file_path.strip():
+        raise ResumeSchemaError("pdf_path must be a non-empty path")
+    root = _workspace_root()
+    raw = Path(file_path.strip()).expanduser()
+    candidate = raw.resolve() if raw.is_absolute() else (root / raw).resolve()
+    if not candidate.is_relative_to(root):
+        raise ResumeSchemaError("pdf_path escapes the configured workspace")
+    if candidate.suffix.lower() != ".pdf":
+        raise ResumeSchemaError("pdf_path must reference a .pdf file")
+    if not candidate.is_file():
+        raise ResumeSchemaError("pdf_path does not exist or is not a file")
+    return candidate
 
 
 def _filename_stem(filename: str) -> str:
@@ -97,6 +119,16 @@ def schema_payload() -> dict[str, Any]:
             "It must choose one supported layout per section and must not emit raw LaTeX."
         ),
         "layouts": list(LAYOUTS),
+        "ai_context": {
+            "default_mode": DEFAULT_AI_CONTEXT_MODE,
+            "modes": list(AI_CONTEXT_MODES),
+            "profile_filename": "career_profile.json",
+            "policy": (
+                "career_profile_json is optional extended machine-readable JSON. "
+                "It is embedded as an associated PDF file; hybrid also adds a short "
+                "experimental ActualText discovery bridge."
+            ),
+        },
         "json_schema": DOCUMENT_SCHEMA,
         "example": EXAMPLE_DOCUMENT,
     }
@@ -133,12 +165,24 @@ def generate_payload(
     resume_json: str,
     filename: str = "resume",
     output_directory: str = "output/resumes",
+    career_profile_json: str = "",
+    ai_context_mode: str = DEFAULT_AI_CONTEXT_MODE,
 ) -> dict[str, Any]:
     try:
         document = parse_document(resume_json)
+        if not isinstance(career_profile_json, str):
+            raise AIContextError("career_profile_json must be text")
+        career_profile = (
+            parse_profile_json(career_profile_json) if career_profile_json.strip() else document
+        )
         destination = _output_directory(output_directory)
         stem = _filename_stem(filename)
-        result = compile_resume(document, template_name="flexible.tex.j2")
+        result = compile_resume(
+            document,
+            template_name="flexible.tex.j2",
+            career_profile=career_profile,
+            ai_context_mode=ai_context_mode,
+        )
         page_count = len(PdfReader(BytesIO(result.pdf)).pages)
         warnings = document_warnings(document)
         max_pages = document["render"]["max_pages"]
@@ -154,7 +198,7 @@ def generate_payload(
         _atomic_write(targets["pdf"], result.pdf)
         _atomic_write(targets["tex"], result.tex.encode("utf-8"))
         _atomic_write(targets["json"], canonical_json.encode("utf-8"))
-    except (ResumeSchemaError, BuildError, OSError, ValueError) as exc:
+    except (ResumeSchemaError, AIContextError, BuildError, OSError, ValueError) as exc:
         return {
             "ok": False,
             "schema_version": SCHEMA_VERSION,
@@ -171,6 +215,33 @@ def generate_payload(
         "section_count": len(document["sections"]),
         "warnings": warnings,
         "pdf_sha256": hashlib.sha256(result.pdf).hexdigest(),
+        "ai_context": {
+            "mode": result.ai_context.mode,
+            "profile_filename": result.ai_context.filename,
+            "profile_sha256": result.ai_context.profile_sha256,
+            "profile_size": result.ai_context.profile_size,
+            "actual_text_bridge": result.ai_context.actual_text_bridge,
+        },
+    }
+
+
+def read_ai_context_payload(pdf_path: str) -> dict[str, Any]:
+    try:
+        source = _workspace_file(pdf_path)
+        profile, manifest = read_embedded_profile(source.read_bytes())
+    except (ResumeSchemaError, AIContextError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "pdf_path": str(source),
+        "ai_context": {
+            "mode": manifest.mode,
+            "profile_filename": manifest.filename,
+            "profile_sha256": manifest.profile_sha256,
+            "profile_size": manifest.profile_size,
+            "actual_text_bridge": manifest.actual_text_bridge,
+        },
+        "career_profile": profile,
     }
 
 
@@ -198,16 +269,41 @@ def resume_generate(
     resume_json: str,
     filename: str = "resume",
     output_directory: str = "output/resumes",
+    career_profile_json: str = "",
+    ai_context_mode: str = DEFAULT_AI_CONTEXT_MODE,
 ) -> dict[str, Any]:
-    """Generate PDF, LaTeX, and canonical JSON files inside the configured workspace.
+    """Generate PDF, LaTeX, and canonical JSON files with optional AI-only context.
 
     Existing files are never overwritten; a numeric suffix is added on collision.
 
     :param resume_json: JSON string that conforms to resume.document.v1.
     :param filename: Filename stem without a directory.
     :param output_directory: Directory relative to RESUME_MCP_WORKSPACE_ROOT.
+    :param career_profile_json: Optional extended career profile JSON object. When
+        omitted, the normalized resume document is embedded instead.
+    :param ai_context_mode: none, embedded, or hybrid. Hybrid embeds the profile,
+        writes XMP discovery metadata, and adds a short experimental ActualText bridge.
     """
-    return generate_payload(resume_json, filename, output_directory)
+    return generate_payload(
+        resume_json,
+        filename,
+        output_directory,
+        career_profile_json,
+        ai_context_mode,
+    )
+
+
+@mcp.tool()
+def resume_read_ai_context(pdf_path: str) -> dict[str, Any]:
+    """Read and verify career_profile.json embedded by Resume Studio.
+
+    Use this instead of relying on a model's generic PDF reader to discover the
+    attachment or ActualText bridge.
+
+    :param pdf_path: PDF path inside RESUME_MCP_WORKSPACE_ROOT. Absolute paths are
+        accepted only when they still resolve inside that workspace.
+    """
+    return read_ai_context_payload(pdf_path)
 
 
 def main() -> None:
