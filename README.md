@@ -135,9 +135,10 @@ The tracked package default lives at:
 resume_builder/default_shared_context.json
 ```
 
-Edit that file to ship public, installation-wide metadata with every generated
-PDF. Do not put personal or secret data there because it is part of the source
-repository and Python package.
+This repository uses that file as Haoxiang Xu's profile-specific baseline. Every
+generated PDF receives the same career focus, resume preferences, and known fact
+notes unless a higher-precedence layer overrides them. Keep secrets out of it:
+the file is part of the source repository and Python package.
 
 Python callers can add or override code-level values directly:
 
@@ -147,8 +148,8 @@ from resume_builder import compile_resume
 result = compile_resume(
     resume_data,
     shared_context={
-        "generator": {"distribution": "internal"},
-        "owner_preferences": {"default_page_limit": 1},
+        "profile": {"target_role": "AI Engineer"},
+        "resume_preferences": {"target_page_count": 1},
     },
 )
 ```

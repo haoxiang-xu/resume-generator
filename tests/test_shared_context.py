@@ -69,7 +69,7 @@ def test_python_api_merges_code_context_over_package_default() -> None:
     _, shared_context, _ = read_ai_context_files(result.pdf)
 
     assert shared_context is not None
-    assert shared_context["context"]["generator"]["name"] == "Resume Studio"
+    assert shared_context["context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
     assert shared_context["context"]["code_layer"]["enabled"] is True
 
 
@@ -86,7 +86,7 @@ def test_package_code_shared_context_is_embedded_by_default(tmp_path, monkeypatc
     assert extracted["ok"] is True
     assert extracted["shared_context"]["schema_version"] == SHARED_CONTEXT_SCHEMA_VERSION
     assert extracted["shared_context"]["revision"] == 0
-    assert extracted["shared_context"]["context"]["generator"]["name"] == "Resume Studio"
+    assert extracted["shared_context"]["context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
     assert extracted["shared_context"]["composition"]["precedence"] == ["code", "workspace"]
 
 
@@ -113,7 +113,7 @@ def test_saved_shared_context_is_embedded_in_every_pdf(tmp_path, monkeypatch) ->
         assert extracted["shared_context"]["context"]["owner_preferences"] == SHARED_CONTEXT[
             "owner_preferences"
         ]
-        assert extracted["shared_context"]["context"]["generator"]["name"] == "Resume Studio"
+        assert extracted["shared_context"]["context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
 
 
 def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> None:
@@ -121,7 +121,7 @@ def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> No
     override.write_text(
         json.dumps(
             {
-                "generator": {"distribution": "custom"},
+                "profile": {"target_role": "AI Engineer"},
                 "owner_preferences": {"default_resume_language": "French"},
             }
         ),
@@ -131,8 +131,8 @@ def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> No
     monkeypatch.setenv("RESUME_MCP_CODE_SHARED_CONTEXT_PATH", str(override))
 
     initial = shared_context_get_payload()
-    assert initial["code_context"]["generator"]["name"] == "Resume Studio"
-    assert initial["code_context"]["generator"]["distribution"] == "custom"
+    assert initial["code_context"]["profile"]["owner"]["name"] == "Haoxiang Xu"
+    assert initial["code_context"]["profile"]["target_role"] == "AI Engineer"
     assert initial["effective_document"]["context"]["owner_preferences"][
         "default_resume_language"
     ] == "French"
@@ -142,7 +142,7 @@ def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> No
     generated = generate_payload(json.dumps(EXAMPLE_DOCUMENT), "layered", "artifacts")
     extracted = read_ai_context_payload(generated["pdf_path"])
 
-    assert extracted["shared_context"]["context"]["generator"]["distribution"] == "custom"
+    assert extracted["shared_context"]["context"]["profile"]["target_role"] == "AI Engineer"
     assert extracted["shared_context"]["context"]["owner_preferences"][
         "default_resume_language"
     ] == "English"
