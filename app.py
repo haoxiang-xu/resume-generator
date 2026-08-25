@@ -7,7 +7,7 @@ from typing import Any
 
 import streamlit as st
 
-from resume_builder import AI_CONTEXT_MODES, BuildError, compile_resume
+from resume_builder import AI_CONTEXT_MODES, BuildError, BuildResult, compile_resume
 
 
 ROOT = Path(__file__).resolve().parent
@@ -64,6 +64,54 @@ def remove_item(section: str, index: int) -> None:
     clear_editor_widgets(f"edit_{section}_")
     st.session_state.pop("pdf_result", None)
     st.rerun()
+
+
+def render_result_workspace(result: BuildResult) -> None:
+    """Show the rendered resume and its exact LaTeX source side by side."""
+    st.subheader("Resume 对照工作台")
+    st.caption("左侧是最终 PDF，右侧是生成该 PDF 的完整 Raw LaTeX。两栏可独立滚动。")
+
+    if result.ai_context.filename:
+        st.caption(
+            f"AI 上下文：{result.ai_context.mode} · {result.ai_context.filename} · "
+            f"{result.ai_context.profile_size} bytes；隐形区："
+            f"{result.ai_context.shared_context_filename} · "
+            f"{result.ai_context.shared_context_size} bytes"
+        )
+
+    preview_col, source_col = st.columns(2, gap="large")
+    with preview_col:
+        with st.container(border=True):
+            st.markdown("#### Rendered Resume")
+            st.caption("最终交付效果 · 可搜索 · 可点击链接 · ATS 友好")
+            st.download_button(
+                "下载 PDF",
+                data=result.pdf,
+                file_name="resume.pdf",
+                mime="application/pdf",
+                type="primary",
+                use_container_width=True,
+            )
+            st.pdf(result.pdf, height=920, key="generated_resume_preview")
+
+    with source_col:
+        with st.container(border=True):
+            st.markdown("#### Raw LaTeX")
+            st.caption("编译输入源码 · 带行号 · 可复制 · 不做折叠或省略")
+            st.download_button(
+                "下载 .tex",
+                data=result.tex,
+                file_name="resume.tex",
+                mime="application/x-tex",
+                use_container_width=True,
+            )
+            st.code(
+                result.tex,
+                language="latex",
+                line_numbers=True,
+                wrap_lines=False,
+                height=920,
+            )
 
 
 st.title("LaTeX Resume Studio")
@@ -211,7 +259,7 @@ with tabs[4]:
 st.divider()
 generate_col, note_col = st.columns([1, 3])
 with generate_col:
-    generate = st.button("生成 PDF", type="primary", use_container_width=True)
+    generate = st.button("生成并查看对照", type="primary", use_container_width=True)
 with note_col:
     st.caption("内容较长时会自然分页。建议最终控制在 1-2 页，并检查日期与拼写。")
 
@@ -235,34 +283,7 @@ if generate:
 
 result = st.session_state.get("pdf_result")
 if result:
-    st.success("PDF 已生成")
-    if result.ai_context.filename:
-        st.caption(
-            f"AI 上下文：{result.ai_context.mode} · {result.ai_context.filename} · "
-            f"{result.ai_context.profile_size} bytes；公共区："
-            f"{result.ai_context.shared_context_filename} · "
-            f"{result.ai_context.shared_context_size} bytes"
-        )
-    download_col, source_col = st.columns(2)
-    with download_col:
-        st.download_button(
-            "下载 PDF",
-            data=result.pdf,
-            file_name="resume.pdf",
-            mime="application/pdf",
-            type="primary",
-            use_container_width=True,
-        )
-    with source_col:
-        st.download_button(
-            "下载 LaTeX 源文件",
-            data=result.tex,
-            file_name="resume.tex",
-            mime="text/plain",
-            use_container_width=True,
-        )
-
-    st.pdf(result.pdf, height=920)
-
-    with st.expander("查看 LaTeX 源码"):
-        st.code(result.tex, language="latex")
+    st.success("PDF 与 LaTeX 已生成")
+    render_result_workspace(result)
+else:
+    st.info("点击“生成并查看对照”后，这里会同时显示 Rendered Resume 和 Raw LaTeX。")

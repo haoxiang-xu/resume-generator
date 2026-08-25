@@ -11,7 +11,9 @@ uv sync
 uv run streamlit run app.py
 ```
 
-The app opens in your browser. Edit each section, click **Generate PDF**, preview the result, and download the PDF or its JSON source.
+The app opens in your browser. Edit each section, click **生成并查看对照**, then
+inspect the rendered PDF and its exact Raw LaTeX side by side. Both panes scroll
+independently and provide their own download action.
 
 ## Build from the command line
 

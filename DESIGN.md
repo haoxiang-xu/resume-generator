@@ -79,6 +79,15 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Mutation: Profile input containing `invisible_context` and Python callers supplying raw `shared_context` both fail closed. Stored v3 Profile-binding watermarks must exactly match regeneration from the stored Profile and revision. The file-controlled template is refreshed and re-rendered on load, so existing Profiles adopt later code-managed file changes.
 - Safety: the watermark carries no host instructions and cannot override host or user instructions. It is tamper evidence, not a private-key digital signature, and its PDF attachment is extractable.
 
+### BC-007 - Web comparison workspace
+
+- Producer: the `BuildResult` returned by `compile_resume` in `app.py`.
+- Boundary: one local Streamlit page after an explicit generation action.
+- Consumer: a user comparing final output with its compiler input.
+- Representation: equal-width, independently scrolling panels with the rendered PDF on the left and the exact, unmodified `BuildResult.tex` on the right.
+- Actions: PDF and `.tex` downloads remain separate; the source panel is read-only and includes line numbers and copy support.
+- Failure semantics: compilation errors are shown without replacing the last successful result.
+
 ## Sequence contract
 
 ### SEQ-001 - repeated generation
@@ -129,6 +138,7 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-020: placeholder rendering is deterministic; every binding records its source, value digest, binding ID, and collection-cycle metadata.
 - AC-021: an out-of-range one-based collection slot cycles by modulo, while an empty collection emits a Profile-bound missing marker.
 - AC-022: new-format PDF verification re-renders the embedded template and rejects mismatched Profile hashes, revisions, rendered content, bindings, or checksums.
+- AC-023: after Web generation, the rendered PDF and complete Raw LaTeX appear side by side with independent downloads.
 
 ## Current renderer constraint
 
