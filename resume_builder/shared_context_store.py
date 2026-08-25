@@ -29,8 +29,24 @@ SHARED_CONTEXT_EXAMPLE: dict[str, Any] = {
         "purpose": "Bind this PDF's invisible context to its Career Profile.",
     },
     "watermark_file": {
-        "sha256": "<SHA-256 of resume_builder/watermark.json>",
-        "content": {},
+        "schema_version": "resume.watermark-render.v1",
+        "template_sha256": "<SHA-256 of resume_builder/watermark.json>",
+        "sha256": "<SHA-256 of the rendered content>",
+        "bindings_sha256": "<SHA-256 of the placeholder binding manifest>",
+        "template": {"identity": {"full_name": "{{profile.full_name}}"}},
+        "content": {"identity": {"full_name": "Example Candidate"}},
+        "bindings": {
+            "profile.full_name": {
+                "binding_id": "wm-<profile-and-field-bound-id>",
+                "source_path": "$.basics.name",
+                "found": True,
+                "requested_index": None,
+                "resolved_index": None,
+                "collection_size": None,
+                "cycled": False,
+                "value_sha256": "<SHA-256 of the resolved value>",
+            }
+        },
     },
 }
 

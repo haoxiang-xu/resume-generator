@@ -71,12 +71,13 @@ This MCP lets an AI choose resume section names, order, count, and content while
 
 - Producer: `build_profile_invisible_context`, using the canonical selected Profile, its SHA-256, optional stored revision, and the current `resume_builder/watermark.json` object.
 - Boundary: revisioned Profile record, then the PDF associated file `shared_context.json`.
-- Consumer: every embedded/hybrid `resume_generate` call and `resume_read_ai_context`.
-- Canonical representation: `resume.shared-context.v1` containing `resume.profile-watermark.v1`, watermark ID, bound Profile SHA-256/revision, detected owner, `generated_by`, purpose, `ai_editable=false`, and `watermark_file` with the exact JSON object plus its SHA-256.
+- Consumer: every embedded/hybrid `resume_generate` call and `resume_read_ai_context`, which re-renders the embedded template against the embedded Profile before returning `verified`.
+- Canonical representation: `resume.shared-context.v1` containing `resume.profile-watermark.v1`, watermark ID, bound Profile SHA-256/revision, detected owner, `generated_by`, purpose, `ai_editable=false`, and `resume.watermark-render.v1`. The render contains Profile-resolved JSON, per-placeholder bindings, and separate template/content/binding SHA-256 values.
 - Composition: `[application_watermark, code_managed_watermark_file]`. There is no CLI flag, environment override, Python raw override, or MCP update tool; `resume_builder/watermark.json` is the only supported payload edit point.
 - Default: generation without a saved Profile derives a revision-0 watermark from the visible normalized resume document. `none` mode is the explicit opt-out from all hidden attachments.
-- Mutation: Profile input containing `invisible_context` and Python callers supplying raw `shared_context` both fail closed. Stored v3 Profile-binding watermarks must exactly match regeneration from the stored Profile and revision. The file-controlled payload is refreshed on load, so existing Profiles adopt later code-managed file changes.
-- Safety: the watermark carries no host instructions and cannot override host or user instructions.
+- Resolution: placeholders use `{{profile.<path>}}`. Common identity aliases and collection aliases are built in; arbitrary Profile paths are supported. Collection indexes are one-based and cycle with `((requested - 1) % count) + 1`; missing values produce deterministic Profile-bound markers.
+- Mutation: Profile input containing `invisible_context` and Python callers supplying raw `shared_context` both fail closed. Stored v3 Profile-binding watermarks must exactly match regeneration from the stored Profile and revision. The file-controlled template is refreshed and re-rendered on load, so existing Profiles adopt later code-managed file changes.
+- Safety: the watermark carries no host instructions and cannot override host or user instructions. It is tamper evidence, not a private-key digital signature, and its PDF attachment is extractable.
 
 ## Sequence contract
 
@@ -125,6 +126,9 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-017: `none` mode omits both JSON attachments and the `/ActualText` bridge.
 - AC-018: two different Profiles produce different generated watermark IDs and Profile hashes.
 - AC-019: AI-authored `invisible_context`, Python raw overrides, and stored watermark tampering fail closed.
+- AC-020: placeholder rendering is deterministic; every binding records its source, value digest, binding ID, and collection-cycle metadata.
+- AC-021: an out-of-range one-based collection slot cycles by modulo, while an empty collection emits a Profile-bound missing marker.
+- AC-022: new-format PDF verification re-renders the embedded template and rejects mismatched Profile hashes, revisions, rendered content, bindings, or checksums.
 
 ## Current renderer constraint
 

@@ -1,1 +1,124 @@
-{}
+{
+  "schema_version": "resume.watermark-template.v1",
+  "identity": {
+    "full_name": "{{profile.full_name}}",
+    "first_name": "{{profile.first_name}}",
+    "middle_names": "{{profile.middle_names}}",
+    "last_name": "{{profile.last_name}}",
+    "initials": "{{profile.initials}}",
+    "email": "{{profile.email}}",
+    "phone": "{{profile.phone}}",
+    "location": "{{profile.location}}",
+    "linkedin": "{{profile.linkedin}}",
+    "github": "{{profile.github}}",
+    "website": "{{profile.website}}"
+  },
+  "profile_binding": {
+    "profile_sha256": "{{profile.profile_sha256}}",
+    "profile_revision": "{{profile.revision}}",
+    "top_level_keys": "{{profile.top_level_keys}}"
+  },
+  "counts": {
+    "experience": "{{profile.experience_count}}",
+    "education": "{{profile.education_count}}",
+    "projects": "{{profile.project_count}}",
+    "skills": "{{profile.skill_count}}",
+    "certifications": "{{profile.certification_count}}",
+    "awards": "{{profile.award_count}}",
+    "publications": "{{profile.publication_count}}",
+    "languages": "{{profile.language_count}}",
+    "volunteer": "{{profile.volunteer_count}}",
+    "references": "{{profile.reference_count}}",
+    "facts": "{{profile.fact_count}}"
+  },
+  "experience_slots": [
+    "{{profile.experience.1}}",
+    "{{profile.experience.2}}",
+    "{{profile.experience.3}}",
+    "{{profile.experience.4}}",
+    "{{profile.experience.5}}",
+    "{{profile.experience.6}}",
+    "{{profile.experience.7}}",
+    "{{profile.experience.8}}"
+  ],
+  "education_slots": [
+    "{{profile.education.1}}",
+    "{{profile.education.2}}",
+    "{{profile.education.3}}",
+    "{{profile.education.4}}",
+    "{{profile.education.5}}",
+    "{{profile.education.6}}"
+  ],
+  "project_slots": [
+    "{{profile.project.1}}",
+    "{{profile.project.2}}",
+    "{{profile.project.3}}",
+    "{{profile.project.4}}",
+    "{{profile.project.5}}",
+    "{{profile.project.6}}"
+  ],
+  "skill_slots": [
+    "{{profile.skill.1}}",
+    "{{profile.skill.2}}",
+    "{{profile.skill.3}}",
+    "{{profile.skill.4}}",
+    "{{profile.skill.5}}",
+    "{{profile.skill.6}}",
+    "{{profile.skill.7}}",
+    "{{profile.skill.8}}",
+    "{{profile.skill.9}}",
+    "{{profile.skill.10}}",
+    "{{profile.skill.11}}",
+    "{{profile.skill.12}}"
+  ],
+  "certification_slots": [
+    "{{profile.certification.1}}",
+    "{{profile.certification.2}}",
+    "{{profile.certification.3}}",
+    "{{profile.certification.4}}"
+  ],
+  "award_slots": [
+    "{{profile.award.1}}",
+    "{{profile.award.2}}",
+    "{{profile.award.3}}",
+    "{{profile.award.4}}"
+  ],
+  "publication_slots": [
+    "{{profile.publication.1}}",
+    "{{profile.publication.2}}",
+    "{{profile.publication.3}}",
+    "{{profile.publication.4}}"
+  ],
+  "language_slots": [
+    "{{profile.language.1}}",
+    "{{profile.language.2}}",
+    "{{profile.language.3}}",
+    "{{profile.language.4}}",
+    "{{profile.language.5}}",
+    "{{profile.language.6}}",
+    "{{profile.language.7}}",
+    "{{profile.language.8}}"
+  ],
+  "volunteer_slots": [
+    "{{profile.volunteer.1}}",
+    "{{profile.volunteer.2}}",
+    "{{profile.volunteer.3}}",
+    "{{profile.volunteer.4}}"
+  ],
+  "reference_slots": [
+    "{{profile.reference.1}}",
+    "{{profile.reference.2}}",
+    "{{profile.reference.3}}",
+    "{{profile.reference.4}}"
+  ],
+  "fact_slots": [
+    "{{profile.fact.1}}",
+    "{{profile.fact.2}}",
+    "{{profile.fact.3}}",
+    "{{profile.fact.4}}",
+    "{{profile.fact.5}}",
+    "{{profile.fact.6}}",
+    "{{profile.fact.7}}",
+    "{{profile.fact.8}}"
+  ]
+}

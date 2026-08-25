@@ -126,17 +126,56 @@ appropriate access controls.
 
 Every `embedded` or `hybrid` PDF contains a separate `shared_context.json`. This
 file contains a deterministic watermark generated from the selected Career
-Profile, plus the current content of the code-managed
+Profile, plus a Profile-specific rendering of the code-managed
 [`resume_builder/watermark.json`](resume_builder/watermark.json). Different
-Profiles receive different watermark IDs and Profile hashes, while all Profiles
-receive the current file payload.
+Profiles receive different watermark IDs, rendered values, and field binding IDs.
 
-`watermark.json` must contain one JSON object. It starts as `{}`; replace that
-object with the metadata you want included in every generated PDF. Resume Studio
-reads it again for every generation, stores its exact content at
-`context.watermark_file.content`, and records its SHA-256 at
-`context.watermark_file.sha256`. Existing Profiles automatically use the current
-file content the next time they are loaded or used to generate a resume.
+`watermark.json` must contain one JSON object. Its default template includes
+identity, experience, education, project, skill, certification, award,
+publication, language, volunteer, reference, and fact slots. Resume Studio reads
+and renders it for every generation. Existing Profiles automatically use the
+current template the next time they are loaded or used to generate a resume.
+
+### Profile placeholders
+
+Placeholder values use `{{profile.<path>}}` syntax:
+
+```json
+{
+  "first_name": "{{profile.first_name}}",
+  "fourth_experience": "{{profile.experience.4}}",
+  "fourth_company": "{{profile.experience.4.organization}}",
+  "custom_value": "{{profile.custom.memberships.3.name}}"
+}
+```
+
+Common identity aliases include `full_name`, `first_name`, `middle_names`,
+`last_name`, `initials`, `email`, `phone`, `location`, `linkedin`, `github`, and
+`website`. Collection aliases include `experience`, `education`, `project`,
+`skill`, `certification`, `award`, `publication`, `language`, `volunteer`,
+`reference`, and `fact`. Append `_count` for collection size, for example
+`{{profile.experience_count}}`. Any exact Profile path is also supported, so a
+custom schema does not require code changes.
+
+Indexes are one-based. If a requested slot exceeds the available collection,
+Resume Studio cycles deterministically using
+`resolved = ((requested - 1) % count) + 1`. With three experiences,
+`experience.4` therefore resolves to experience 1 and `experience.5` to
+experience 2. An empty or missing field becomes a Profile-bound missing marker
+instead of leaving an unresolved placeholder.
+
+The source template is stored at `context.watermark_file.template` and rendered
+JSON at `context.watermark_file.content`. Every resolved placeholder also gets a
+manifest entry under `context.watermark_file.bindings`
+with a Profile-and-field-bound `binding_id`, source path, value SHA-256, collection
+size, resolved index, and `cycled` flag. Template, rendered content, and complete
+binding manifest each have separate SHA-256 values.
+
+`resume_read_ai_context` re-renders the embedded template against the embedded
+Profile. New-format PDFs return `watermark_verification.status=verified` only when
+the Profile binding, rendered content, every binding record, and all three hashes
+match. This verification does not depend on the installation's current template,
+so a previously generated PDF remains verifiable after `watermark.json` changes.
 
 Use `resume_profile_get` or `resume_shared_context_get` to inspect the generated
 watermark. There is deliberately no MCP mutation tool, CLI override, environment
@@ -175,5 +214,12 @@ uv run resume-build resume.json output/resume.pdf \
 
 The watermark records its contract version, ID, bound Profile SHA-256, Profile
 revision, detected owner, generator, purpose, and `ai_editable=false`. The
-`watermark_file` section contains the JSON object and its checksum. Supplying
-`invisible_context` or a raw `shared_context` override fails closed.
+`watermark_file` section contains the rendered JSON, binding manifest, and their
+checksums. Supplying `invisible_context` or a raw `shared_context` override fails
+closed.
+
+This mechanism provides deterministic Profile binding and tamper evidence, but
+it is not a cryptographic signature: anyone who controls the generator can still
+forge a new watermark. Authenticity against a hostile generator requires signing
+the final manifest with a private key. Also remember that invisible PDF
+attachments are extractable; do not put secrets in the Profile or template.

@@ -39,6 +39,10 @@ def test_python_api_generates_watermark_from_profile() -> None:
     assert watermark["profile_owner"] == "Python Candidate"
     assert watermark["ai_editable"] is False
     assert watermark["schema_version"] == "resume.profile-watermark.v1"
+    watermark_file = shared_context["context"]["watermark_file"]
+    assert watermark_file["content"]["identity"]["full_name"] == "Python Candidate"
+    assert watermark_file["bindings"]["profile.full_name"]["found"] is True
+    assert len(watermark_file["bindings_sha256"]) == 64
 
 
 def test_pdf_contains_code_managed_watermark_file(tmp_path, monkeypatch) -> None:

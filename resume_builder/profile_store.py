@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .ai_context import AIContextError, canonical_profile_bytes, parse_profile_json
+from .watermark_template import (
+    WATERMARK_RENDER_SCHEMA_VERSION,
+    WatermarkTemplateError,
+    render_watermark_template,
+)
 
 
 PROFILE_SCHEMA_VERSION = "resume.career-profile.v3"
@@ -206,6 +211,17 @@ def build_profile_invisible_context(
     revision_value = revision if revision is not None else 0
     watermark_file = load_watermark_file()
     watermark_file_bytes = canonical_profile_bytes(watermark_file)
+    try:
+        rendered_watermark = render_watermark_template(
+            watermark_file,
+            profile,
+            profile_sha256=profile_sha256,
+            revision=revision,
+        )
+    except WatermarkTemplateError as exc:
+        raise ProfileStoreError(f"could not render watermark.json: {exc}") from exc
+    rendered_bytes = canonical_profile_bytes(rendered_watermark.content)
+    bindings_bytes = canonical_profile_bytes(rendered_watermark.bindings)
     context = {
         "watermark": {
             "schema_version": WATERMARK_SCHEMA_VERSION,
@@ -218,8 +234,13 @@ def build_profile_invisible_context(
             "purpose": "Bind this PDF's invisible context to its Career Profile.",
         },
         "watermark_file": {
-            "sha256": hashlib.sha256(watermark_file_bytes).hexdigest(),
-            "content": watermark_file,
+            "schema_version": WATERMARK_RENDER_SCHEMA_VERSION,
+            "template_sha256": hashlib.sha256(watermark_file_bytes).hexdigest(),
+            "sha256": hashlib.sha256(rendered_bytes).hexdigest(),
+            "bindings_sha256": hashlib.sha256(bindings_bytes).hexdigest(),
+            "template": watermark_file,
+            "content": rendered_watermark.content,
+            "bindings": rendered_watermark.bindings,
         },
     }
     validate_invisible_context(context)
@@ -386,6 +407,92 @@ def load_profile(workspace_root: Path) -> ProfileRecord | None:
     if expected_sha256 and expected_sha256 != record.profile_sha256:
         raise ProfileStoreError("stored career profile SHA-256 does not match its content")
     return record
+
+
+def verify_profile_watermark(
+    embedded_profile: dict[str, Any],
+    shared_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Re-render an embedded template and verify its complete Profile binding."""
+    if not isinstance(embedded_profile, dict) or not isinstance(shared_context, dict):
+        raise ProfileStoreError("embedded Profile and shared context must be JSON objects")
+    stored_schema = embedded_profile.get("schema_version")
+    if stored_schema in {PROFILE_SCHEMA_VERSION, *LEGACY_PROFILE_SCHEMA_VERSIONS}:
+        profile = embedded_profile.get("profile")
+        revision = embedded_profile.get("revision")
+        if not isinstance(profile, dict):
+            raise ProfileStoreError("embedded career Profile body must be a JSON object")
+    else:
+        profile = embedded_profile
+        revision = None
+
+    context = shared_context.get("context")
+    if not isinstance(context, dict):
+        raise ProfileStoreError("shared context must contain a context object")
+    watermark = context.get("watermark")
+    watermark_file = context.get("watermark_file")
+    if not isinstance(watermark, dict) or not isinstance(watermark_file, dict):
+        trust = shared_context.get("trust")
+        if isinstance(trust, dict) and trust.get("level") == "application-managed-watermark":
+            raise ProfileStoreError("shared context is missing its Profile watermark")
+        return {
+            "status": "unavailable",
+            "reason": "PDF does not contain an application-managed Profile watermark",
+        }
+    if watermark_file.get("schema_version") != WATERMARK_RENDER_SCHEMA_VERSION:
+        return {
+            "status": "unavailable",
+            "reason": "PDF predates the verifiable placeholder watermark format",
+        }
+
+    template = watermark_file.get("template")
+    content = watermark_file.get("content")
+    bindings = watermark_file.get("bindings")
+    if not isinstance(template, dict):
+        raise ProfileStoreError("watermark verification template must be a JSON object")
+    if not isinstance(content, dict) or not isinstance(bindings, dict):
+        raise ProfileStoreError("watermark content and bindings must be JSON objects")
+
+    profile_sha256 = hashlib.sha256(canonical_profile_bytes(profile)).hexdigest()
+    if watermark.get("profile_sha256") != profile_sha256:
+        raise ProfileStoreError("watermark Profile SHA-256 does not match the embedded Profile")
+    if watermark.get("profile_revision") != revision:
+        raise ProfileStoreError("watermark Profile revision does not match the embedded Profile")
+
+    try:
+        expected = render_watermark_template(
+            template,
+            profile,
+            profile_sha256=profile_sha256,
+            revision=revision,
+        )
+    except WatermarkTemplateError as exc:
+        raise ProfileStoreError(f"could not verify embedded watermark template: {exc}") from exc
+    template_sha256 = hashlib.sha256(canonical_profile_bytes(template)).hexdigest()
+    rendered_sha256 = hashlib.sha256(canonical_profile_bytes(expected.content)).hexdigest()
+    bindings_sha256 = hashlib.sha256(canonical_profile_bytes(expected.bindings)).hexdigest()
+    checks = {
+        "template_sha256": (watermark_file.get("template_sha256"), template_sha256),
+        "rendered_sha256": (watermark_file.get("sha256"), rendered_sha256),
+        "bindings_sha256": (watermark_file.get("bindings_sha256"), bindings_sha256),
+        "rendered_content": (content, expected.content),
+        "bindings": (bindings, expected.bindings),
+    }
+    failed = [name for name, (actual, expected_value) in checks.items() if actual != expected_value]
+    if failed:
+        raise ProfileStoreError(
+            "watermark Profile binding verification failed: " + ", ".join(failed)
+        )
+    return {
+        "status": "verified",
+        "schema_version": WATERMARK_RENDER_SCHEMA_VERSION,
+        "profile_sha256": profile_sha256,
+        "profile_revision": revision,
+        "binding_count": len(bindings),
+        "template_sha256": template_sha256,
+        "rendered_sha256": rendered_sha256,
+        "bindings_sha256": bindings_sha256,
+    }
 
 
 def profile_update_preview(

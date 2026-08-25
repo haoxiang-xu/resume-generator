@@ -1,5 +1,5 @@
-import json
 import hashlib
+import json
 
 import pytest
 
@@ -22,7 +22,9 @@ from resume_builder.profile_store import (
     profile_path,
     search_profile,
     update_profile,
+    verify_profile_watermark,
 )
+from resume_builder.shared_context_store import shared_context_document
 
 
 PROFILE = {
@@ -160,6 +162,37 @@ def test_watermark_file_must_contain_a_json_object(tmp_path, content) -> None:
         load_watermark_file(source)
 
 
+def test_profile_watermark_verifier_detects_rendered_content_tampering(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "watermark.json"
+    source.write_text(
+        json.dumps({"name": "{{profile.full_name}}", "job": "{{profile.experience.2}}"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(profile_store, "WATERMARK_FILE_PATH", source)
+    profile = {
+        "candidate": {"name": "Verified Candidate"},
+        "experience": [{"organization": "Only Employer"}],
+    }
+    context = profile_store.build_profile_invisible_context(profile, 1)
+    shared = shared_context_document(context, profile_revision=1)
+    embedded_profile = {
+        "schema_version": PROFILE_SCHEMA_VERSION,
+        "revision": 1,
+        "updated_at": "2026-08-25T00:00:00Z",
+        "profile": profile,
+    }
+
+    verified = verify_profile_watermark(embedded_profile, shared)
+    assert verified["status"] == "verified"
+    assert verified["binding_count"] == 2
+
+    shared["context"]["watermark_file"]["content"]["name"] = "Forged Candidate"
+    with pytest.raises(ProfileStoreError, match="rendered_content"):
+        verify_profile_watermark(embedded_profile, shared)
+
+
 def test_profile_path_rejects_symlink_escape(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     outside = tmp_path / "outside"
@@ -238,6 +271,7 @@ def test_mcp_profile_round_trip_and_generation_history(tmp_path, monkeypatch) ->
 
     extracted = read_ai_context_payload(generated["pdf_path"])
     assert extracted["ok"] is True
+    assert extracted["watermark_verification"]["status"] == "verified"
     assert extracted["career_profile"]["schema_version"] == PROFILE_SCHEMA_VERSION
     assert extracted["career_profile"]["revision"] == 1
     assert extracted["career_profile"]["profile"] == PROFILE

@@ -48,6 +48,7 @@ from .profile_store import (
     search_profile,
     split_profile_bundle,
     update_profile,
+    verify_profile_watermark,
     validate_profile,
 )
 from .shared_context_store import (
@@ -489,6 +490,11 @@ def read_ai_context_payload(pdf_path: str) -> dict[str, Any]:
     try:
         source = _workspace_file(pdf_path)
         profile, shared_context, manifest = read_ai_context_files(source.read_bytes())
+        watermark_verification = (
+            verify_profile_watermark(profile, shared_context)
+            if shared_context is not None
+            else {"status": "not_present"}
+        )
     except (ResumeSchemaError, AIContextError, OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
     return {
@@ -506,6 +512,7 @@ def read_ai_context_payload(pdf_path: str) -> dict[str, Any]:
         },
         "career_profile": profile,
         "shared_context": shared_context,
+        "watermark_verification": watermark_verification,
     }
 
 
