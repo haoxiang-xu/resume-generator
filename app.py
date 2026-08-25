@@ -8,6 +8,8 @@ from typing import Any
 import streamlit as st
 
 from resume_builder import AI_CONTEXT_MODES, BuildError, BuildResult, compile_resume
+from resume_builder.ai_context import AIContextError, read_ai_context_files
+from resume_builder.profile_store import ProfileStoreError, verify_profile_watermark
 
 
 ROOT = Path(__file__).resolve().parent
@@ -68,8 +70,21 @@ def remove_item(section: str, index: int) -> None:
 
 def render_result_workspace(result: BuildResult) -> None:
     """Show the rendered resume and its exact LaTeX source side by side."""
+    shared_context: dict[str, Any] | None = None
+    watermark_verification: dict[str, Any] | None = None
+    watermark_error: str | None = None
+    try:
+        embedded_profile, shared_context, _ = read_ai_context_files(result.pdf)
+        if shared_context is not None:
+            watermark_verification = verify_profile_watermark(
+                embedded_profile,
+                shared_context,
+            )
+    except (AIContextError, ProfileStoreError, ValueError) as exc:
+        watermark_error = str(exc)
+
     st.subheader("Resume 对照工作台")
-    st.caption("左侧是最终 PDF，右侧是生成该 PDF 的完整 Raw LaTeX。两栏可独立滚动。")
+    st.caption("左侧是最终 PDF；右侧可切换完整 Raw LaTeX 和实际嵌入的 Watermark JSON。")
 
     if result.ai_context.filename:
         st.caption(
@@ -96,22 +111,59 @@ def render_result_workspace(result: BuildResult) -> None:
 
     with source_col:
         with st.container(border=True):
-            st.markdown("#### Raw LaTeX")
-            st.caption("编译输入源码 · 带行号 · 可复制 · 不做折叠或省略")
-            st.download_button(
-                "下载 .tex",
-                data=result.tex,
-                file_name="resume.tex",
-                mime="application/x-tex",
-                use_container_width=True,
-            )
-            st.code(
-                result.tex,
-                language="latex",
-                line_numbers=True,
-                wrap_lines=False,
-                height=920,
-            )
+            st.markdown("#### Source & Watermark")
+            latex_tab, watermark_tab = st.tabs(["Raw LaTeX", "Watermark JSON"])
+            with latex_tab:
+                st.caption("编译输入源码 · 带行号 · 可复制 · 不做折叠或省略")
+                st.download_button(
+                    "下载 .tex",
+                    data=result.tex,
+                    file_name="resume.tex",
+                    mime="application/x-tex",
+                    use_container_width=True,
+                )
+                st.code(
+                    result.tex,
+                    language="latex",
+                    line_numbers=True,
+                    wrap_lines=False,
+                    height=920,
+                )
+
+            with watermark_tab:
+                st.caption("最终 PDF 内的 shared_context.json · 包含模板、绑定和校验摘要")
+                if watermark_error is not None:
+                    st.error(f"Watermark 回读失败：{watermark_error}")
+                elif shared_context is None:
+                    st.info("当前 PDF 上下文模式没有嵌入 Watermark JSON。")
+                else:
+                    if watermark_verification is not None:
+                        status = str(watermark_verification.get("status", "unknown"))
+                        binding_count = watermark_verification.get("binding_count")
+                        if status == "verified":
+                            st.success(f"Watermark verified · {binding_count} bindings")
+                        else:
+                            st.warning(f"Watermark verification: {status}")
+                    watermark_json = json.dumps(
+                        shared_context,
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    st.download_button(
+                        "下载 watermark JSON",
+                        data=watermark_json,
+                        file_name="shared_context.json",
+                        mime="application/json",
+                        use_container_width=True,
+                    )
+                    st.code(
+                        watermark_json,
+                        language="json",
+                        line_numbers=True,
+                        wrap_lines=False,
+                        height=820,
+                    )
 
 
 st.title("LaTeX Resume Studio")
