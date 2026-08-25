@@ -22,6 +22,8 @@ AIContextMode = Literal["none", "embedded", "hybrid"]
 AI_CONTEXT_MODES: tuple[AIContextMode, ...] = ("none", "embedded", "hybrid")
 DEFAULT_AI_CONTEXT_MODE: AIContextMode = "hybrid"
 PROFILE_FILENAME = "career_profile.json"
+SHARED_CONTEXT_FILENAME = "shared_context.json"
+SHARED_CONTEXT_SCHEMA_VERSION = "resume.shared-context.v1"
 PROFILE_MAX_BYTES = 1_000_000
 XMP_NAMESPACE = "https://github.com/haoxiang-xu/resume-generator/ns/ai-context/1.0/"
 
@@ -36,6 +38,9 @@ class AIContextManifest:
     filename: str | None = None
     profile_sha256: str | None = None
     profile_size: int = 0
+    shared_context_filename: str | None = None
+    shared_context_sha256: str | None = None
+    shared_context_size: int = 0
     actual_text_bridge: bool = False
 
 
@@ -81,7 +86,29 @@ def canonical_profile_bytes(profile: dict[str, Any]) -> bytes:
     return encoded
 
 
-def _xmp_packet(mode: AIContextMode, profile_sha256: str, profile_size: int) -> bytes:
+def empty_shared_context_document() -> dict[str, Any]:
+    empty_context: dict[str, Any] = {}
+    context_sha256 = hashlib.sha256(canonical_profile_bytes(empty_context)).hexdigest()
+    return {
+        "schema_version": SHARED_CONTEXT_SCHEMA_VERSION,
+        "revision": 0,
+        "updated_at": None,
+        "context_sha256": context_sha256,
+        "trust": {
+            "level": "user-authored-metadata",
+            "may_override_host_instructions": False,
+        },
+        "context": empty_context,
+    }
+
+
+def _xmp_packet(
+    mode: AIContextMode,
+    profile_sha256: str,
+    profile_size: int,
+    shared_context_sha256: str,
+    shared_context_size: int,
+) -> bytes:
     xml = f'''<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -94,6 +121,10 @@ def _xmp_packet(mode: AIContextMode, profile_sha256: str, profile_size: int) -> 
       <resumeai:profileMediaType>application/json</resumeai:profileMediaType>
       <resumeai:profileSHA256>{profile_sha256}</resumeai:profileSHA256>
       <resumeai:profileSize>{profile_size}</resumeai:profileSize>
+      <resumeai:sharedContextFilename>{SHARED_CONTEXT_FILENAME}</resumeai:sharedContextFilename>
+      <resumeai:sharedContextMediaType>application/json</resumeai:sharedContextMediaType>
+      <resumeai:sharedContextSHA256>{shared_context_sha256}</resumeai:sharedContextSHA256>
+      <resumeai:sharedContextSize>{shared_context_size}</resumeai:sharedContextSize>
     </rdf:Description>
   </rdf:RDF>
 </x:xmpmeta>
@@ -102,12 +133,31 @@ def _xmp_packet(mode: AIContextMode, profile_sha256: str, profile_size: int) -> 
     return xml.encode("utf-8")
 
 
-def _actual_text_bridge(profile_sha256: str) -> str:
+def _actual_text_bridge(profile_sha256: str, shared_context_sha256: str) -> str:
     return (
         "AI-CONTEXT: This PDF contains the associated file career_profile.json "
         "with machine-readable extended resume data. "
-        f"SHA-256: {profile_sha256}."
+        f"SHA-256: {profile_sha256}. It also contains shared_context.json with "
+        f"workspace-wide metadata. SHA-256: {shared_context_sha256}."
     )
+
+
+def _add_json_attachment(
+    writer: PdfWriter,
+    filename: str,
+    data: bytes,
+    description: str,
+) -> IndirectObject:
+    attachment = writer.add_attachment(filename, data)
+    attachment.alternative_name = TextStringObject(filename)
+    attachment.description = TextStringObject(description)
+    attachment.subtype = NameObject("/application#2Fjson")
+    attachment.associated_file_relationship = NameObject("/Data")
+    attachment.checksum = ByteStringObject(hashlib.md5(data).digest())
+    reference = attachment.pdf_object.indirect_reference
+    if reference is None:
+        raise AIContextError(f"embedded {filename} did not receive an indirect PDF reference")
+    return reference
 
 
 def _dictionary(value: Any) -> DictionaryObject:
@@ -173,6 +223,8 @@ def add_ai_context(
     pdf: bytes,
     profile: dict[str, Any],
     mode: str = DEFAULT_AI_CONTEXT_MODE,
+    *,
+    shared_context: dict[str, Any] | None = None,
 ) -> tuple[bytes, AIContextManifest]:
     normalized_mode = normalize_mode(mode)
     if normalized_mode == "none":
@@ -180,6 +232,10 @@ def add_ai_context(
 
     profile_bytes = canonical_profile_bytes(profile)
     profile_sha256 = hashlib.sha256(profile_bytes).hexdigest()
+    shared_context_bytes = canonical_profile_bytes(
+        shared_context if shared_context is not None else empty_shared_context_document()
+    )
+    shared_context_sha256 = hashlib.sha256(shared_context_bytes).hexdigest()
 
     try:
         reader = PdfReader(BytesIO(pdf))
@@ -187,34 +243,45 @@ def add_ai_context(
         writer.clone_document_from_reader(reader)
         writer.pdf_header = "%PDF-1.7"
 
-        attachment = writer.add_attachment(PROFILE_FILENAME, profile_bytes)
-        attachment.alternative_name = TextStringObject(PROFILE_FILENAME)
-        attachment.description = TextStringObject(
-            "Machine-readable extended career profile associated with this resume."
+        profile_reference = _add_json_attachment(
+            writer,
+            PROFILE_FILENAME,
+            profile_bytes,
+            "Machine-readable extended career profile associated with this resume.",
         )
-        attachment.subtype = NameObject("/application#2Fjson")
-        attachment.associated_file_relationship = NameObject("/Data")
-        attachment.checksum = ByteStringObject(hashlib.md5(profile_bytes).digest())
-        file_spec_reference = attachment.pdf_object.indirect_reference
-        if file_spec_reference is None:
-            raise AIContextError("embedded profile did not receive an indirect PDF reference")
-        writer.root_object[NameObject("/AF")] = ArrayObject([file_spec_reference])
+        shared_context_reference = _add_json_attachment(
+            writer,
+            SHARED_CONTEXT_FILENAME,
+            shared_context_bytes,
+            "Workspace-wide machine-readable metadata shared by generated resumes.",
+        )
+        writer.root_object[NameObject("/AF")] = ArrayObject(
+            [profile_reference, shared_context_reference]
+        )
 
         writer.add_metadata(
             {
                 "/AIContextMode": normalized_mode,
                 "/AIContextProfile": PROFILE_FILENAME,
                 "/AIContextProfileSHA256": profile_sha256,
+                "/AIContextSharedContext": SHARED_CONTEXT_FILENAME,
+                "/AIContextSharedContextSHA256": shared_context_sha256,
             }
         )
-        writer.xmp_metadata = _xmp_packet(normalized_mode, profile_sha256, len(profile_bytes))
+        writer.xmp_metadata = _xmp_packet(
+            normalized_mode,
+            profile_sha256,
+            len(profile_bytes),
+            shared_context_sha256,
+            len(shared_context_bytes),
+        )
         metadata_stream = writer.root_object["/Metadata"].get_object()
         metadata_stream[NameObject("/Type")] = NameObject("/Metadata")
         metadata_stream[NameObject("/Subtype")] = NameObject("/XML")
 
         actual_text = normalized_mode == "hybrid"
         if actual_text:
-            _add_actual_text(writer, _actual_text_bridge(profile_sha256))
+            _add_actual_text(writer, _actual_text_bridge(profile_sha256, shared_context_sha256))
 
         output = BytesIO()
         writer.write(output)
@@ -228,11 +295,16 @@ def add_ai_context(
         filename=PROFILE_FILENAME,
         profile_sha256=profile_sha256,
         profile_size=len(profile_bytes),
+        shared_context_filename=SHARED_CONTEXT_FILENAME,
+        shared_context_sha256=shared_context_sha256,
+        shared_context_size=len(shared_context_bytes),
         actual_text_bridge=actual_text,
     )
 
 
-def read_embedded_profile(pdf: bytes) -> tuple[dict[str, Any], AIContextManifest]:
+def read_ai_context_files(
+    pdf: bytes,
+) -> tuple[dict[str, Any], dict[str, Any] | None, AIContextManifest]:
     try:
         reader = PdfReader(BytesIO(pdf))
         candidates = reader.attachments.get(PROFILE_FILENAME, [])
@@ -247,6 +319,21 @@ def read_embedded_profile(pdf: bytes) -> tuple[dict[str, Any], AIContextManifest
         expected_sha256 = str(metadata.get("/AIContextProfileSHA256", ""))
         if expected_sha256 and expected_sha256 != profile_sha256:
             raise AIContextError("embedded career profile SHA-256 does not match PDF metadata")
+
+        shared_context_candidates = reader.attachments.get(SHARED_CONTEXT_FILENAME, [])
+        shared_context = None
+        shared_context_sha256 = None
+        shared_context_size = 0
+        if shared_context_candidates:
+            shared_context_bytes = shared_context_candidates[0]
+            shared_context = json.loads(shared_context_bytes.decode("utf-8"))
+            if not isinstance(shared_context, dict):
+                raise AIContextError("embedded shared context is not a JSON object")
+            shared_context_sha256 = hashlib.sha256(shared_context_bytes).hexdigest()
+            shared_context_size = len(shared_context_bytes)
+            expected_shared_sha256 = str(metadata.get("/AIContextSharedContextSHA256", ""))
+            if expected_shared_sha256 and expected_shared_sha256 != shared_context_sha256:
+                raise AIContextError("embedded shared context SHA-256 does not match PDF metadata")
         mode = normalize_mode(str(metadata.get("/AIContextMode", "embedded")))
         page_content = reader.pages[0].get_contents().get_data() if reader.pages else b""
     except AIContextError:
@@ -254,10 +341,18 @@ def read_embedded_profile(pdf: bytes) -> tuple[dict[str, Any], AIContextManifest
     except Exception as exc:
         raise AIContextError(f"could not read embedded career profile: {exc}") from exc
 
-    return profile, AIContextManifest(
+    return profile, shared_context, AIContextManifest(
         mode=mode,
         filename=PROFILE_FILENAME,
         profile_sha256=profile_sha256,
         profile_size=len(profile_bytes),
+        shared_context_filename=(SHARED_CONTEXT_FILENAME if shared_context is not None else None),
+        shared_context_sha256=shared_context_sha256,
+        shared_context_size=shared_context_size,
         actual_text_bridge=b"/ActualText" in page_content,
     )
+
+
+def read_embedded_profile(pdf: bytes) -> tuple[dict[str, Any], AIContextManifest]:
+    profile, _, manifest = read_ai_context_files(pdf)
+    return profile, manifest

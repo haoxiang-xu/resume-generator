@@ -12,6 +12,8 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - `resume_profile_update`: previews or explicitly commits a complete profile replacement.
 - `resume_profile_validate`: validates proposed or stored profile data without writing.
 - `resume_profile_search`: performs local transparent keyword search over profile values.
+- `resume_shared_context_get`: reads workspace-wide metadata embedded in generated PDFs.
+- `resume_shared_context_update`: previews or explicitly commits the shared context.
 - `resume_generation_history`: returns recent generation provenance records.
 
 ## Boundary contracts
@@ -43,7 +45,7 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Consumer: `resume_read_ai_context`, PDF attachment tools, or generic text extractors.
 - Canonical representation: UTF-8 JSON object serialized with sorted keys and a trailing newline as `career_profile.json`, limited to 1,000,000 bytes.
 - Integrity: the canonical profile SHA-256 is recorded in PDF metadata and XMP; the embedded-file checksum uses the PDF-defined MD5 field. Reads fail if the SHA-256 does not match.
-- Modes: `none`, `embedded`, and `hybrid`. `hybrid` adds a short invisible `/ActualText` discovery bridge containing only the attachment name and SHA-256, never the complete profile.
+- Modes: `none`, `embedded`, and `hybrid`. Embedded and hybrid carry both `career_profile.json` and `shared_context.json`. `hybrid` adds a short invisible `/ActualText` discovery bridge containing only attachment names and SHA-256 values, never the complete payloads.
 - Accessibility warning: the bridge is intentionally experimental and is not claimed to conform to PDF/UA. Screen readers, copy/paste, ATS tools, and text extractors may expose it.
 - Failure semantics: malformed JSON, non-object JSON, oversize profiles, unsupported modes, missing attachments, and integrity mismatches fail closed.
 
@@ -63,8 +65,18 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Producer: each successful `resume_generate` call.
 - Boundary: append-only `.resume/history/generations.jsonl` inside the workspace.
 - Consumer: `resume_generation_history`.
-- Canonical entry: generation UUID, UTC timestamp, relative PDF path, PDF SHA-256, resume schema, section IDs, AI-context mode, embedded profile SHA-256, profile source, and optional profile revision.
+- Canonical entry: generation UUID, UTC timestamp, relative PDF path, PDF SHA-256, resume schema, section IDs, AI-context mode, embedded profile/shared-context SHA-256 values, their sources, and optional revisions.
 - Failure semantics: history failure does not invalidate an already generated PDF; it is returned as a warning.
+
+### BC-006 - workspace shared context
+
+- Producer: user-approved `resume_shared_context_update` calls.
+- Boundary: `.resume/shared_context.json` beneath `RESUME_MCP_WORKSPACE_ROOT`, then the PDF associated file of the same name.
+- Consumer: every embedded/hybrid `resume_generate` call and `resume_read_ai_context`.
+- Canonical representation: `resume.shared-context.v1` JSON with revision, UTC timestamp, context SHA-256, explicit non-authoritative trust policy, and a flexible context object limited to 250,000 bytes.
+- Default: before initialization, generation embeds a stable empty revision 0 document. `none` mode is the only explicit opt-out from hidden attachments.
+- Mutation: preview by default; `confirm=true` plus matching `expected_revision` commits atomically.
+- Safety: credential keys, identity-secret keys, and fields masquerading as system/developer prompts fail closed. Shared metadata cannot override host or user instructions.
 
 ## Sequence contract
 
@@ -84,6 +96,14 @@ This MCP lets an AI choose resume section names, order, count, and content while
 4. A later update must supply revision 1; stale revision 0 is rejected.
 5. `resume_generate` embeds the saved profile record and logs revision 1 in generation history.
 
+### SEQ-003 - shared context propagation
+
+1. Before initialization, `resume_shared_context_get` returns the effective empty revision 0 document.
+2. Preview and confirmed update create revision 1 under `.resume/shared_context.json`.
+3. Every subsequent embedded/hybrid PDF carries that exact revision as a separate associated file.
+4. XMP, PDF metadata, `/ActualText`, generation history, and the MCP result expose its SHA-256 and revision.
+5. `none` mode carries no hidden files and logs the shared context as disabled.
+
 ## Acceptance criteria
 
 - AC-001: valid documents with AI-selected titles and mixed layouts generate searchable PDFs.
@@ -91,7 +111,7 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-003: absolute paths and `..` escapes fail at BC-002.
 - AC-004: repeated generation creates a numeric suffix and preserves the first artifact.
 - AC-005: `resume_validate` performs no filesystem writes.
-- AC-006: a real MCP stdio client can list and call all nine tools.
+- AC-006: a real MCP stdio client can list and call all eleven tools.
 - AC-007: the rendered PDF is visually inspected after every meaningful template change.
 - AC-008: embedded and hybrid PDFs round-trip `career_profile.json` with a verified SHA-256.
 - AC-009: hybrid is discoverable through `/ActualText`; embedded mode contains no `/ActualText` bridge.
@@ -100,6 +120,9 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-012: stale profile revisions and sensitive credential keys fail closed.
 - AC-013: profile search returns matching JSON paths without external services.
 - AC-014: generation automatically uses the saved profile and records its revision.
+- AC-015: every embedded/hybrid PDF contains `shared_context.json`, including empty revision 0 before initialization.
+- AC-016: a committed shared-context revision propagates identically to repeated generations.
+- AC-017: `none` mode omits both JSON attachments and the `/ActualText` bridge.
 
 ## Current renderer constraint
 

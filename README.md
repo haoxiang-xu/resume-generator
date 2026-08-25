@@ -19,9 +19,10 @@ The app opens in your browser. Edit each section, click **Generate PDF**, previe
 uv run resume-build example_resume.json output/resume.pdf
 ```
 
-By default, the PDF uses `hybrid` AI context mode: it embeds a machine-readable
-`career_profile.json`, writes discovery metadata, and adds a short experimental
-`/ActualText` bridge. To embed a richer profile than the visible resume:
+By default, the PDF uses `hybrid` AI context mode: it embeds machine-readable
+`career_profile.json` and workspace-wide `shared_context.json`, writes discovery
+metadata, and adds a short experimental `/ActualText` bridge. To embed a richer
+profile than the visible resume:
 
 ```bash
 uv run resume-build example_resume.json output/resume.pdf \
@@ -31,8 +32,8 @@ uv run resume-build example_resume.json output/resume.pdf \
 
 Available modes:
 
-- `none`: generate an ordinary PDF without machine-readable profile data.
-- `embedded`: embed `career_profile.json` and XMP discovery metadata.
+- `none`: generate an ordinary PDF without either hidden JSON attachment.
+- `embedded`: embed `career_profile.json`, `shared_context.json`, and XMP metadata.
 - `hybrid`: use `embedded` behavior plus a short `/ActualText` discovery bridge.
 
 `/ActualText` is an experimental compatibility layer, not private storage. It
@@ -49,6 +50,7 @@ workspace Career Profile:
 - `resume_get_schema` and `resume_validate`
 - `resume_profile_get`, `resume_profile_validate`, `resume_profile_search`
 - `resume_profile_update`
+- `resume_shared_context_get` and `resume_shared_context_update`
 - `resume_generate` and `resume_read_ai_context`
 - `resume_generation_history`
 
@@ -69,8 +71,8 @@ The AI is free to choose section names, order, and count. It chooses one constra
 
 `resume_generate` accepts optional `career_profile_json` and `ai_context_mode`
 arguments. `resume_read_ai_context` reliably extracts and verifies the embedded
-profile from a generated PDF; use it instead of assuming a generic PDF reader
-will discover attachments or accessibility replacement text.
+profile and shared context from a generated PDF; use it instead of assuming a
+generic PDF reader will discover attachments or accessibility replacement text.
 
 ## Workspace Career Profile
 
@@ -80,6 +82,7 @@ memory:
 ```text
 .resume/
 ├── career_profile.json
+├── shared_context.json
 └── history/
     └── generations.jsonl
 ```
@@ -106,3 +109,20 @@ access tokens, private keys, and SSNs are rejected.
 The `.resume/` directory is ignored by this repository to prevent accidental
 publication of personal data. If you version it, use a private repository with
 appropriate access controls.
+
+## Workspace-wide hidden context
+
+Every `embedded` or `hybrid` PDF contains a separate `shared_context.json`. This
+is the common machine-readable area shared by every resume generated from the
+workspace. Before initialization it exists as an empty revision 0 document, so
+the attachment contract is stable from the first PDF onward.
+
+Use `resume_shared_context_get` to inspect it and `resume_shared_context_update`
+to preview or explicitly commit changes. Typical contents include default resume
+language, page-limit preferences, provenance, and non-authoritative usage notes.
+The context is marked `user-authored-metadata` and cannot override user, host,
+developer, or system instructions. Keys that masquerade as host prompts, along
+with credentials and identity secrets, are rejected.
+
+`ai_context_mode=none` remains the explicit escape hatch and produces a PDF with
+no `career_profile.json`, no `shared_context.json`, and no `/ActualText` bridge.

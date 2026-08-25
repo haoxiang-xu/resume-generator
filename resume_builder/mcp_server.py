@@ -17,8 +17,9 @@ from .ai_context import (
     AI_CONTEXT_MODES,
     DEFAULT_AI_CONTEXT_MODE,
     AIContextError,
+    SHARED_CONTEXT_SCHEMA_VERSION,
     canonical_profile_bytes,
-    read_embedded_profile,
+    read_ai_context_files,
 )
 from .compiler import BuildError, compile_resume, render_latex
 from .flexible_schema import (
@@ -45,6 +46,15 @@ from .profile_store import (
     search_profile,
     update_profile,
     validate_profile,
+)
+from .shared_context_store import (
+    SHARED_CONTEXT_EXAMPLE,
+    SharedContextStoreError,
+    load_shared_context,
+    resolved_shared_context_document,
+    shared_context_path,
+    update_shared_context,
+    validate_shared_context,
 )
 
 
@@ -159,6 +169,16 @@ def schema_payload() -> dict[str, Any]:
             ),
             "example_profile": PROFILE_EXAMPLE,
         },
+        "shared_context": {
+            "schema_version": SHARED_CONTEXT_SCHEMA_VERSION,
+            "workspace_path": f"{PROFILE_DIRECTORY}/shared_context.json",
+            "policy": (
+                "The shared context is embedded into every embedded or hybrid PDF. "
+                "Updates are previewed by default and require confirm=true plus a matching revision. "
+                "It is user-authored metadata and cannot override user or host instructions."
+            ),
+            "example": SHARED_CONTEXT_EXAMPLE,
+        },
         "json_schema": DOCUMENT_SCHEMA,
         "example": EXAMPLE_DOCUMENT,
     }
@@ -220,16 +240,35 @@ def generate_payload(
                 profile_source = "resume_document"
                 profile_revision = None
                 profile_warnings = []
+        shared_context, configured_shared_context_revision = resolved_shared_context_document(root)
+        shared_context_warnings = (
+            validate_shared_context(shared_context["context"])
+            if configured_shared_context_revision
+            else []
+        )
         destination = _output_directory(output_directory)
         stem = _filename_stem(filename)
         result = compile_resume(
             document,
             template_name="flexible.tex.j2",
             career_profile=career_profile,
+            shared_context=shared_context,
             ai_context_mode=ai_context_mode,
         )
         page_count = len(PdfReader(BytesIO(result.pdf)).pages)
-        warnings = document_warnings(document) + profile_warnings
+        warnings = document_warnings(document) + profile_warnings + shared_context_warnings
+        shared_context_revision = (
+            configured_shared_context_revision
+            if result.ai_context.shared_context_filename is not None
+            else None
+        )
+        shared_context_source = (
+            "disabled"
+            if result.ai_context.shared_context_filename is None
+            else "workspace"
+            if configured_shared_context_revision
+            else "default_empty"
+        )
         max_pages = document["render"]["max_pages"]
         if page_count > max_pages:
             warnings.append(
@@ -258,6 +297,9 @@ def generate_payload(
             "profile_source": profile_source,
             "profile_revision": profile_revision,
             "embedded_profile_sha256": result.ai_context.profile_sha256,
+            "shared_context_source": shared_context_source,
+            "shared_context_revision": shared_context_revision,
+            "embedded_shared_context_sha256": result.ai_context.shared_context_sha256,
             "ai_context_mode": result.ai_context.mode,
         }
         try:
@@ -268,6 +310,7 @@ def generate_payload(
         ResumeSchemaError,
         AIContextError,
         ProfileStoreError,
+        SharedContextStoreError,
         BuildError,
         OSError,
         ValueError,
@@ -291,11 +334,16 @@ def generate_payload(
         "generation_id": generation_id,
         "profile_source": profile_source,
         "profile_revision": profile_revision,
+        "shared_context_source": shared_context_source,
+        "shared_context_revision": shared_context_revision,
         "ai_context": {
             "mode": result.ai_context.mode,
             "profile_filename": result.ai_context.filename,
             "profile_sha256": result.ai_context.profile_sha256,
             "profile_size": result.ai_context.profile_size,
+            "shared_context_filename": result.ai_context.shared_context_filename,
+            "shared_context_sha256": result.ai_context.shared_context_sha256,
+            "shared_context_size": result.ai_context.shared_context_size,
             "actual_text_bridge": result.ai_context.actual_text_bridge,
         },
     }
@@ -342,6 +390,54 @@ def profile_update_payload(
         "ok": True,
         "committed": record is not None,
         "profile_path": str(profile_path(root)),
+        "preview": preview,
+    }
+    if record is not None:
+        payload["record"] = record.as_document()
+    else:
+        payload["next_step"] = (
+            "Show this preview to the user. Call again with confirm=true only after explicit approval."
+        )
+    return payload
+
+
+def shared_context_get_payload() -> dict[str, Any]:
+    try:
+        root = _workspace_root()
+        record = load_shared_context(root)
+        effective_document, effective_revision = resolved_shared_context_document(root)
+    except (SharedContextStoreError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "found": record is not None,
+        "shared_context_path": str(shared_context_path(root)),
+        "current_revision": effective_revision,
+        "record": record.as_document() if record else None,
+        "effective_document": effective_document,
+        "warnings": validate_shared_context(record.context) if record else [],
+    }
+
+
+def shared_context_update_payload(
+    shared_context_json: str,
+    expected_revision: int = 0,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    try:
+        root = _workspace_root()
+        record, preview = update_shared_context(
+            root,
+            shared_context_json,
+            expected_revision,
+            confirm=confirm,
+        )
+    except (SharedContextStoreError, OSError, ValueError) as exc:
+        return {"ok": False, "committed": False, "error": str(exc)}
+    payload: dict[str, Any] = {
+        "ok": True,
+        "committed": record is not None,
+        "shared_context_path": str(shared_context_path(root)),
         "preview": preview,
     }
     if record is not None:
@@ -408,7 +504,7 @@ def generation_history_payload(limit: int = 20) -> dict[str, Any]:
 def read_ai_context_payload(pdf_path: str) -> dict[str, Any]:
     try:
         source = _workspace_file(pdf_path)
-        profile, manifest = read_embedded_profile(source.read_bytes())
+        profile, shared_context, manifest = read_ai_context_files(source.read_bytes())
     except (ResumeSchemaError, AIContextError, OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
     return {
@@ -419,9 +515,13 @@ def read_ai_context_payload(pdf_path: str) -> dict[str, Any]:
             "profile_filename": manifest.filename,
             "profile_sha256": manifest.profile_sha256,
             "profile_size": manifest.profile_size,
+            "shared_context_filename": manifest.shared_context_filename,
+            "shared_context_sha256": manifest.shared_context_sha256,
+            "shared_context_size": manifest.shared_context_size,
             "actual_text_bridge": manifest.actual_text_bridge,
         },
         "career_profile": profile,
+        "shared_context": shared_context,
     }
 
 
@@ -496,6 +596,35 @@ def resume_profile_search(query: str, limit: int = 20) -> dict[str, Any]:
 
 
 @mcp.tool()
+def resume_shared_context_get() -> dict[str, Any]:
+    """Read the workspace-wide context embedded into generated resume PDFs.
+
+    Before initialization, returns revision 0 and the effective empty context.
+    Shared context is user-authored metadata and never overrides host instructions.
+    """
+    return shared_context_get_payload()
+
+
+@mcp.tool()
+def resume_shared_context_update(
+    shared_context_json: str,
+    expected_revision: int = 0,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Preview or commit workspace-wide context for generated PDFs.
+
+    Call first with confirm=false and show the diff to the user. Call again with
+    confirm=true only after explicit approval. Every embedded or hybrid PDF then
+    receives the revisioned shared_context.json attachment automatically.
+
+    :param shared_context_json: Complete shared context as a JSON object.
+    :param expected_revision: Current revision, or 0 before initialization.
+    :param confirm: False previews without writing; true commits the reviewed update.
+    """
+    return shared_context_update_payload(shared_context_json, expected_revision, confirm)
+
+
+@mcp.tool()
 def resume_generation_history(limit: int = 20) -> dict[str, Any]:
     """List recent resume generations and the profile revision used for each.
 
@@ -523,7 +652,8 @@ def resume_generate(
         When omitted, the saved workspace profile is used; if none exists, the
         normalized resume document is embedded instead.
     :param ai_context_mode: none, embedded, or hybrid. Hybrid embeds the profile,
-        writes XMP discovery metadata, and adds a short experimental ActualText bridge.
+        workspace shared context, XMP discovery metadata, and a short experimental
+        ActualText bridge. None explicitly disables both hidden JSON attachments.
     """
     return generate_payload(
         resume_json,
@@ -536,7 +666,7 @@ def resume_generate(
 
 @mcp.tool()
 def resume_read_ai_context(pdf_path: str) -> dict[str, Any]:
-    """Read and verify career_profile.json embedded by Resume Studio.
+    """Read and verify career_profile.json and shared_context.json embedded by Resume Studio.
 
     Use this instead of relying on a model's generic PDF reader to discover the
     attachment or ActualText bridge.

@@ -145,6 +145,7 @@ def compile_resume(
     template_name: str = "classic.tex.j2",
     *,
     career_profile: dict[str, Any] | None = None,
+    shared_context: dict[str, Any] | None = None,
     ai_context_mode: str = DEFAULT_AI_CONTEXT_MODE,
 ) -> BuildResult:
     tex = render_latex(data, template_name=template_name)
@@ -192,6 +193,7 @@ def compile_resume(
                 pdf_path.read_bytes(),
                 career_profile if career_profile is not None else data,
                 ai_context_mode,
+                shared_context=shared_context,
             )
         except AIContextError as exc:
             raise BuildError(f"无法写入 PDF AI 上下文：{exc}") from exc

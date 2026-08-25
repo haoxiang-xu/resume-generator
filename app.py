@@ -239,7 +239,9 @@ if result:
     if result.ai_context.filename:
         st.caption(
             f"AI 上下文：{result.ai_context.mode} · {result.ai_context.filename} · "
-            f"{result.ai_context.profile_size} bytes"
+            f"{result.ai_context.profile_size} bytes；公共区："
+            f"{result.ai_context.shared_context_filename} · "
+            f"{result.ai_context.shared_context_size} bytes"
         )
     download_col, source_col = st.columns(2)
     with download_col:

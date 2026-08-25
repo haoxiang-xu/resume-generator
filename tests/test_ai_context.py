@@ -10,6 +10,7 @@ from pypdf import PdfReader
 from resume_builder.ai_context import (
     AIContextError,
     PROFILE_FILENAME,
+    SHARED_CONTEXT_FILENAME,
     add_ai_context,
     canonical_profile_bytes,
     parse_profile_json,
@@ -49,7 +50,10 @@ def test_hybrid_profile_round_trip(base_pdf: bytes) -> None:
     assert manifest.actual_text_bridge is True
     assert manifest.profile_sha256 == hashlib.sha256(canonical_profile_bytes(profile)).hexdigest()
     assert b"profileFilename" in metadata_packet
+    assert b"sharedContextFilename" in metadata_packet
     assert b"/ActualText" in reader.pages[0].get_contents().get_data()
+    assert SHARED_CONTEXT_FILENAME in reader.attachments
+    assert manifest.shared_context_filename == SHARED_CONTEXT_FILENAME
 
 
 def test_embedded_mode_has_no_actual_text(base_pdf: bytes) -> None:
@@ -59,6 +63,7 @@ def test_embedded_mode_has_no_actual_text(base_pdf: bytes) -> None:
     assert manifest.actual_text_bridge is False
     assert b"/ActualText" not in reader.pages[0].get_contents().get_data()
     assert PROFILE_FILENAME in reader.attachments
+    assert SHARED_CONTEXT_FILENAME in reader.attachments
 
 
 def test_none_mode_preserves_pdf_bytes(base_pdf: bytes) -> None:

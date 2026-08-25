@@ -48,6 +48,11 @@ def main() -> None:
             f"Embedded {result.ai_context.filename} "
             f"({result.ai_context.profile_size} bytes, mode={result.ai_context.mode})"
         )
+    if result.ai_context.shared_context_filename:
+        print(
+            f"Embedded {result.ai_context.shared_context_filename} "
+            f"({result.ai_context.shared_context_size} bytes)"
+        )
 
 
 if __name__ == "__main__":
