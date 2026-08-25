@@ -15,16 +15,11 @@ from .ai_context import (
     DEFAULT_AI_CONTEXT_MODE,
     AIContextError,
     AIContextManifest,
-    SHARED_CONTEXT_SCHEMA_VERSION,
     add_ai_context,
     canonical_profile_bytes,
 )
-from .profile_store import ProfileStoreError, split_profile_bundle
-from .shared_context_store import (
-    SharedContextStoreError,
-    merge_shared_contexts,
-    shared_context_document,
-)
+from .profile_store import ProfileRecord, ProfileStoreError, split_profile_bundle
+from .shared_context_store import SharedContextStoreError, shared_context_document
 
 
 PACKAGE_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
@@ -156,7 +151,7 @@ def compile_resume(
     template_name: str = "classic.tex.j2",
     *,
     career_profile: dict[str, Any] | None = None,
-    shared_context: dict[str, Any] | None = None,
+    _profile_record: ProfileRecord | None = None,
     ai_context_mode: str = DEFAULT_AI_CONTEXT_MODE,
 ) -> BuildResult:
     tex = render_latex(data, template_name=template_name)
@@ -200,26 +195,24 @@ def compile_resume(
         if not pdf_path.exists():
             raise BuildError("LaTeX 已运行，但没有生成 PDF。")
         try:
-            profile_bundle = career_profile if career_profile is not None else data
-            embedded_profile, profile_invisible_context = split_profile_bundle(profile_bundle)
+            if _profile_record is not None:
+                embedded_profile = _profile_record.as_embedded_profile_document()
+                profile_invisible_context = _profile_record.invisible_context
+                profile_revision = _profile_record.revision
+            else:
+                profile_bundle = career_profile if career_profile is not None else data
+                embedded_profile, profile_invisible_context = split_profile_bundle(profile_bundle)
+                profile_revision = None
             embedded_profile_sha256 = hashlib.sha256(
                 canonical_profile_bytes(embedded_profile)
             ).hexdigest()
             if str(ai_context_mode).strip().lower() == "none":
                 effective_shared_context = None
-            elif shared_context is None:
+            else:
                 effective_shared_context = shared_context_document(
                     profile_invisible_context,
                     profile_sha256=embedded_profile_sha256,
-                )
-            elif not isinstance(shared_context, dict):
-                raise SharedContextStoreError("shared_context must be a JSON object")
-            elif shared_context.get("schema_version") == SHARED_CONTEXT_SCHEMA_VERSION:
-                effective_shared_context = shared_context
-            else:
-                effective_shared_context = shared_context_document(
-                    merge_shared_contexts(profile_invisible_context, shared_context),
-                    profile_sha256=embedded_profile_sha256,
+                    profile_revision=profile_revision,
                 )
             pdf, ai_context = add_ai_context(
                 pdf_path.read_bytes(),

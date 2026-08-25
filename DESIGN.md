@@ -9,11 +9,10 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - `resume_generate`: writes a collision-safe PDF, LaTeX source, and canonical JSON document inside the configured workspace.
 - `resume_read_ai_context`: extracts and verifies the associated `career_profile.json` from a generated PDF.
 - `resume_profile_get`: reads the revisioned workspace Career Profile.
-- `resume_profile_update`: previews or explicitly commits a Profile and its invisible context together.
+- `resume_profile_update`: previews or explicitly commits a Profile; the app generates its watermark.
 - `resume_profile_validate`: validates proposed or stored profile data without writing.
 - `resume_profile_search`: performs local transparent keyword search over profile values.
-- `resume_shared_context_get`: reads the current Profile's effective invisible PDF context.
-- `resume_shared_context_update`: previews or commits an optional current-Profile override.
+- `resume_shared_context_get`: reads the current Profile's application-generated watermark.
 - `resume_generation_history`: returns recent generation provenance records.
 
 ## Boundary contracts
@@ -54,8 +53,8 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Producer: user-approved `resume_profile_update` calls.
 - Boundary: `.resume/career_profile.json` beneath `RESUME_MCP_WORKSPACE_ROOT`.
 - Consumer: profile tools and `resume_generate` when no one-off profile is supplied.
-- Canonical representation: `resume.career-profile.v2` JSON containing revision, UTC update timestamp, separate profile and invisible-context SHA-256 values, a flexible profile object, and its flexible `invisible_context` object. v1 records remain readable with an empty context for migration.
-- Admission: Profile creation/replacement requires both the profile object and `invisible_context`. Profile JSON must be under 1,000,000 bytes and invisible context under 250,000 bytes. Reserved fact status and visibility values are closed enums. Credential, high-risk identity-secret, and host-prompt impersonation keys fail closed.
+- Canonical representation: `resume.career-profile.v3` JSON containing revision, UTC update timestamp, Profile SHA-256, a flexible profile object, and the application-generated watermark plus its SHA-256. v1/v2 records remain readable and receive a regenerated watermark in memory.
+- Admission: Profile input must not contain the reserved `invisible_context` field. Profile JSON must be under 1,000,000 bytes. Reserved fact status and visibility values are closed enums. Credential and high-risk identity-secret keys fail closed.
 - Mutation: `confirm=false` returns a diff without writing. `confirm=true` writes atomically only when `expected_revision` matches the current revision.
 - Privacy: `.resume/` is ignored in this public source repository. Users may version it only in an appropriately protected workspace.
 - Failure semantics: corrupt storage, checksum mismatch, stale revision, path escape through symlinks, invalid fact fields, and sensitive keys fail closed.
@@ -68,16 +67,16 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Canonical entry: generation UUID, UTC timestamp, relative PDF path, PDF SHA-256, resume schema, section IDs, AI-context mode, embedded profile/shared-context SHA-256 values, their sources, and optional revisions.
 - Failure semantics: history failure does not invalidate an already generated PDF; it is returned as a warning.
 
-### BC-006 - Profile-owned invisible context
+### BC-006 - application-managed Profile watermark
 
-- Producer: the selected Career Profile's required `invisible_context`, an optional `RESUME_MCP_CODE_SHARED_CONTEXT_PATH` or Python `shared_context` override, and optional user-approved `resume_shared_context_update` calls.
-- Boundary: Profile record, optional overrides, then the PDF associated file `shared_context.json`.
+- Producer: `build_profile_invisible_context`, using the canonical selected Profile, its SHA-256, and optional stored revision.
+- Boundary: revisioned Profile record, then the PDF associated file `shared_context.json`.
 - Consumer: every embedded/hybrid `resume_generate` call and `resume_read_ai_context`.
-- Canonical representation: `resume.shared-context.v1` JSON with revision, UTC timestamp, context SHA-256, explicit non-authoritative trust policy, and a flexible context object limited to 250,000 bytes.
-- Composition: objects merge recursively with precedence `Profile invisible_context < code/Python override < workspace override`; arrays and scalar values replace lower layers. The embedded document records the Profile binding, context SHA-256, and workspace revision.
-- Default: unrelated Profiles never inherit a package-global context. Generation without a Profile embeds an empty revision-0 context only to preserve the attachment contract. `none` mode is the explicit opt-out from all hidden attachments.
-- Mutation: preview by default; `confirm=true` plus matching `expected_revision` commits atomically.
-- Safety: credential keys, identity-secret keys, and fields masquerading as system/developer prompts fail closed. Shared metadata cannot override host or user instructions.
+- Canonical representation: `resume.shared-context.v1` containing `resume.profile-watermark.v1`, watermark ID, bound Profile SHA-256/revision, detected owner, `generated_by`, purpose, and `ai_editable=false`.
+- Composition: `[application_watermark]` only. There is no package default, merge layer, CLI flag, environment override, Python raw override, or MCP update tool.
+- Default: generation without a saved Profile derives a revision-0 watermark from the visible normalized resume document. `none` mode is the explicit opt-out from all hidden attachments.
+- Mutation: Profile input containing `invisible_context` and Python callers supplying raw `shared_context` both fail closed. Stored v3 watermarks must exactly match regeneration from the stored Profile and revision.
+- Safety: the watermark carries no host instructions and cannot override host or user instructions.
 
 ## Sequence contract
 
@@ -89,19 +88,19 @@ This MCP lets an AI choose resume section names, order, count, and content while
 4. Restart preserves collision behavior because the workspace files are the source of truth.
 5. No retry or resume operation overwrites an existing artifact.
 
-### SEQ-002 - Profile and invisible-context update
+### SEQ-002 - Profile update and watermark generation
 
 1. `resume_profile_get` returns revision 0 when no profile exists.
-2. `resume_profile_update(confirm=false)` requires both Profile data and `invisible_context`, then previews revision 1 without writing.
+2. `resume_profile_update(confirm=false)` rejects caller-supplied `invisible_context`, generates the revision-1 watermark, and previews both Profile and watermark hashes without writing.
 3. After user approval, the same call with `confirm=true` atomically commits revision 1.
 4. A later update must supply revision 1; stale revision 0 is rejected.
 5. `resume_generate` embeds the saved Profile record as `career_profile.json`, its bound context as `shared_context.json`, and logs revision 1.
 
 ### SEQ-003 - shared context propagation
 
-1. Profile creation stores `invisible_context` in the same revisioned Profile document.
-2. An optional previewed and confirmed override may create revision 1 under `.resume/shared_context.json`.
-3. Every subsequent embedded/hybrid PDF carries the selected Profile context plus optional overrides as a separate associated file.
+1. Profile creation generates and stores the watermark in the same revisioned Profile document.
+2. `resume_shared_context_get` exposes the watermark read-only; no mutation tool is registered.
+3. Every subsequent embedded/hybrid PDF carries that generated watermark as a separate associated file.
 4. XMP, PDF metadata, `/ActualText`, generation history, and the MCP result expose its SHA-256 and revision.
 5. `none` mode carries no hidden files and logs the shared context as disabled.
 
@@ -112,7 +111,7 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-003: absolute paths and `..` escapes fail at BC-002.
 - AC-004: repeated generation creates a numeric suffix and preserves the first artifact.
 - AC-005: `resume_validate` performs no filesystem writes.
-- AC-006: a real MCP stdio client can list and call all eleven tools.
+- AC-006: a real MCP stdio client can list and call all ten tools; no shared-context update tool is registered.
 - AC-007: the rendered PDF is visually inspected after every meaningful template change.
 - AC-008: embedded and hybrid PDFs round-trip `career_profile.json` with a verified SHA-256.
 - AC-009: hybrid is discoverable through `/ActualText`; embedded mode contains no `/ActualText` bridge.
@@ -121,11 +120,11 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-012: stale profile revisions and sensitive credential keys fail closed.
 - AC-013: profile search returns matching JSON paths without external services.
 - AC-014: generation automatically uses the saved profile and records its revision.
-- AC-015: every embedded/hybrid PDF contains `shared_context.json`; no Profile means an empty revision-0 attachment rather than a global candidate context.
-- AC-016: a committed shared-context revision propagates identically to repeated generations.
+- AC-015: every embedded/hybrid PDF contains a generated `shared_context.json` watermark; no saved Profile means a watermark derived from the visible document.
+- AC-016: the same canonical Profile and revision produce the same watermark deterministically.
 - AC-017: `none` mode omits both JSON attachments and the `/ActualText` bridge.
-- AC-018: each Profile creation requires and stores its own `invisible_context`; two different Profiles produce two different context attachments.
-- AC-019: Python, CLI, MCP code-file, and workspace overrides recursively merge over the selected Profile context.
+- AC-018: two different Profiles produce different generated watermark IDs and Profile hashes.
+- AC-019: AI-authored `invisible_context`, Python raw overrides, and stored watermark tampering fail closed.
 
 ## Current renderer constraint
 

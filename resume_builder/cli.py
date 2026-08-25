@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .ai_context import AI_CONTEXT_MODES, DEFAULT_AI_CONTEXT_MODE, AIContextError, parse_profile_json
 from .compiler import BuildError, compile_resume
-from .shared_context_store import SharedContextStoreError, parse_shared_context
+from .shared_context_store import SharedContextStoreError
 
 
 def main() -> None:
@@ -24,11 +24,6 @@ def main() -> None:
         default=DEFAULT_AI_CONTEXT_MODE,
         help="PDF machine-readable context mode (default: hybrid)",
     )
-    parser.add_argument(
-        "--shared-context",
-        type=Path,
-        help="Optional JSON override merged over the Career Profile's invisible_context",
-    )
     args = parser.parse_args()
 
     data = json.loads(args.input.read_text(encoding="utf-8"))
@@ -38,15 +33,9 @@ def main() -> None:
             if args.career_profile
             else data
         )
-        shared_context = (
-            parse_shared_context(args.shared_context.read_text(encoding="utf-8"))
-            if args.shared_context
-            else None
-        )
         result = compile_resume(
             data,
             career_profile=career_profile,
-            shared_context=shared_context,
             ai_context_mode=args.ai_context_mode,
         )
     except (AIContextError, SharedContextStoreError, BuildError, OSError) as exc:

@@ -13,8 +13,12 @@ from typing import Any, Iterator
 from .ai_context import AIContextError, canonical_profile_bytes, parse_profile_json
 
 
-PROFILE_SCHEMA_VERSION = "resume.career-profile.v2"
-LEGACY_PROFILE_SCHEMA_VERSION = "resume.career-profile.v1"
+PROFILE_SCHEMA_VERSION = "resume.career-profile.v3"
+LEGACY_PROFILE_SCHEMA_VERSIONS = {
+    "resume.career-profile.v1",
+    "resume.career-profile.v2",
+}
+WATERMARK_SCHEMA_VERSION = "resume.profile-watermark.v1"
 PROFILE_DIRECTORY = ".resume"
 PROFILE_FILENAME = "career_profile.json"
 INVISIBLE_CONTEXT_KEY = "invisible_context"
@@ -45,15 +49,6 @@ PROFILE_EXAMPLE: dict[str, Any] = {
             "visibility": "ai_only",
         },
     ],
-    INVISIBLE_CONTEXT_KEY: {
-        "resume_preferences": {
-            "default_language": "English",
-            "target_page_count": 1,
-        },
-        "additional_context": [
-            "Use verified impact and role-relevant technical depth.",
-        ],
-    },
 }
 PROHIBITED_KEYS = {
     "access_token",
@@ -66,13 +61,6 @@ PROHIBITED_KEYS = {
     "social_security_number",
     "ssn",
 }
-NON_AUTHORITATIVE_PROMPT_KEYS = {
-    "developer_prompt",
-    "override_instructions",
-    "system_prompt",
-}
-
-
 class ProfileStoreError(ValueError):
     """Raised when a workspace career profile cannot be validated or persisted."""
 
@@ -111,9 +99,7 @@ class ProfileRecord:
         return document
 
     def as_profile_bundle(self) -> dict[str, Any]:
-        bundle = copy.deepcopy(self.profile)
-        bundle[INVISIBLE_CONTEXT_KEY] = copy.deepcopy(self.invisible_context)
-        return bundle
+        return copy.deepcopy(self.profile)
 
 
 def _now() -> str:
@@ -179,67 +165,73 @@ def _check_sensitive_keys(value: Any, path: str = "$") -> None:
             _check_sensitive_keys(child, f"{path}[{index}]")
 
 
+def _profile_owner(profile: dict[str, Any]) -> str | None:
+    for container_key in ("basics", "candidate"):
+        container = profile.get(container_key)
+        if isinstance(container, dict):
+            name = str(container.get("name", "")).strip()
+            if name:
+                return name
+    name = str(profile.get("name", "")).strip()
+    return name or None
+
+
+def build_profile_invisible_context(
+    profile: dict[str, Any],
+    revision: int | None = None,
+) -> dict[str, Any]:
+    """Build the application-owned watermark. Profile inputs cannot supply it."""
+    if not isinstance(profile, dict):
+        raise ProfileStoreError("career profile must be a JSON object")
+    profile_sha256 = hashlib.sha256(canonical_profile_bytes(profile)).hexdigest()
+    revision_value = revision if revision is not None else 0
+    return {
+        "watermark": {
+            "schema_version": WATERMARK_SCHEMA_VERSION,
+            "watermark_id": f"resume-{profile_sha256[:24]}-r{revision_value}",
+            "profile_sha256": profile_sha256,
+            "profile_revision": revision,
+            "profile_owner": _profile_owner(profile),
+            "generated_by": "Resume Studio",
+            "ai_editable": False,
+            "purpose": "Bind this PDF's invisible context to its Career Profile.",
+        }
+    }
+
+
 def validate_invisible_context(context: dict[str, Any]) -> list[str]:
     if not isinstance(context, dict):
-        raise ProfileStoreError(f"$.{INVISIBLE_CONTEXT_KEY} must be a JSON object")
-    try:
-        encoded = canonical_profile_bytes(context)
-    except AIContextError as exc:
-        raise ProfileStoreError(str(exc)) from exc
+        raise ProfileStoreError("stored invisible_context must be a JSON object")
+    encoded = canonical_profile_bytes(context)
     if len(encoded) > INVISIBLE_CONTEXT_MAX_BYTES:
-        raise ProfileStoreError(
-            f"$.{INVISIBLE_CONTEXT_KEY} exceeds the 250,000 byte limit"
-        )
-    _check_sensitive_keys(context, f"$.{INVISIBLE_CONTEXT_KEY}")
-
-    def check_prompt_keys(value: Any, path: str) -> None:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                child_path = f"{path}.{key}"
-                if str(key).strip().lower() in NON_AUTHORITATIVE_PROMPT_KEYS:
-                    raise ProfileStoreError(
-                        f"{child_path}: invisible context cannot masquerade as host-level instructions"
-                    )
-                check_prompt_keys(child, child_path)
-        elif isinstance(value, list):
-            for index, child in enumerate(value):
-                check_prompt_keys(child, f"{path}[{index}]")
-
-    check_prompt_keys(context, f"$.{INVISIBLE_CONTEXT_KEY}")
-    warnings: list[str] = []
-    if not context:
-        warnings.append("The profile invisible context is empty.")
-    return warnings
+        raise ProfileStoreError("stored invisible_context exceeds the 250,000 byte limit")
+    return []
 
 
 def split_profile_bundle(
     profile: dict[str, Any],
     *,
-    require_invisible_context: bool = False,
+    profile_revision: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(profile, dict):
         raise ProfileStoreError("career profile must be a JSON object")
     bundle = copy.deepcopy(profile)
-    if require_invisible_context and INVISIBLE_CONTEXT_KEY not in bundle:
+    if INVISIBLE_CONTEXT_KEY in bundle:
         raise ProfileStoreError(
-            f"$.{INVISIBLE_CONTEXT_KEY} is required when creating or updating a profile"
+            f"$.{INVISIBLE_CONTEXT_KEY} is application-generated and cannot be supplied or edited"
         )
-    context = bundle.pop(INVISIBLE_CONTEXT_KEY, {})
-    if not isinstance(context, dict):
-        raise ProfileStoreError(f"$.{INVISIBLE_CONTEXT_KEY} must be a JSON object")
-    validate_invisible_context(context)
-    return bundle, context
+    return bundle, build_profile_invisible_context(bundle, profile_revision)
 
 
 def validate_profile(profile: dict[str, Any]) -> list[str]:
-    profile_body, invisible_context = split_profile_bundle(profile)
+    profile_body, _ = split_profile_bundle(profile)
     try:
         canonical_profile_bytes(profile_body)
     except AIContextError as exc:
         raise ProfileStoreError(str(exc)) from exc
     _check_sensitive_keys(profile_body)
 
-    warnings = validate_invisible_context(invisible_context)
+    warnings: list[str] = []
     if not profile_body:
         warnings.append("The career profile is empty.")
 
@@ -323,10 +315,11 @@ def load_profile(workspace_root: Path) -> ProfileRecord | None:
         raise ProfileStoreError(f"stored career profile is missing: {', '.join(sorted(missing))}")
     if unknown:
         raise ProfileStoreError(f"stored career profile has unknown keys: {', '.join(sorted(unknown))}")
-    if raw["schema_version"] not in {PROFILE_SCHEMA_VERSION, LEGACY_PROFILE_SCHEMA_VERSION}:
+    stored_schema_version = raw["schema_version"]
+    if stored_schema_version not in {PROFILE_SCHEMA_VERSION, *LEGACY_PROFILE_SCHEMA_VERSIONS}:
         raise ProfileStoreError(
             f"stored schema_version must equal {PROFILE_SCHEMA_VERSION} "
-            f"or {LEGACY_PROFILE_SCHEMA_VERSION}"
+            f"or a supported legacy version"
         )
     revision = raw["revision"]
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
@@ -337,10 +330,18 @@ def load_profile(workspace_root: Path) -> ProfileRecord | None:
     if not isinstance(profile, dict):
         raise ProfileStoreError("stored profile must be a JSON object")
     validate_profile(profile)
-    invisible_context = raw.get(INVISIBLE_CONTEXT_KEY, {})
-    if not isinstance(invisible_context, dict):
-        raise ProfileStoreError("stored invisible_context must be a JSON object")
-    validate_invisible_context(invisible_context)
+    generated_context = build_profile_invisible_context(profile, revision)
+    if stored_schema_version == PROFILE_SCHEMA_VERSION:
+        invisible_context = raw.get(INVISIBLE_CONTEXT_KEY)
+        if not isinstance(invisible_context, dict):
+            raise ProfileStoreError("stored invisible_context must be a JSON object")
+        validate_invisible_context(invisible_context)
+        if invisible_context != generated_context:
+            raise ProfileStoreError(
+                "stored invisible context does not match the application-generated watermark"
+            )
+    else:
+        invisible_context = generated_context
     record = ProfileRecord(
         revision=revision,
         updated_at=raw["updated_at"],
@@ -351,7 +352,11 @@ def load_profile(workspace_root: Path) -> ProfileRecord | None:
     if expected_sha256 and expected_sha256 != record.profile_sha256:
         raise ProfileStoreError("stored career profile SHA-256 does not match its content")
     expected_context_sha256 = str(raw.get("invisible_context_sha256", ""))
-    if expected_context_sha256 and expected_context_sha256 != record.invisible_context_sha256:
+    if (
+        stored_schema_version == PROFILE_SCHEMA_VERSION
+        and expected_context_sha256
+        and expected_context_sha256 != record.invisible_context_sha256
+    ):
         raise ProfileStoreError("stored invisible context SHA-256 does not match its content")
     return record
 
@@ -363,17 +368,14 @@ def profile_update_preview(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
         raise ProfileStoreError("expected_revision must be a non-negative integer")
-    profile_bundle = parse_profile(profile_json)
-    profile, invisible_context = split_profile_bundle(
-        profile_bundle,
-        require_invisible_context=True,
-    )
+    profile = parse_profile(profile_json)
     current = load_profile(workspace_root)
     current_revision = current.revision if current else 0
     if current_revision != expected_revision:
         raise ProfileStoreError(
             f"revision conflict: expected {expected_revision}, current revision is {current_revision}"
         )
+    invisible_context = build_profile_invisible_context(profile, current_revision + 1)
     previous = current.profile if current else {}
     previous_context = current.invisible_context if current else {}
     added = sorted(set(profile) - set(previous))
@@ -406,7 +408,8 @@ def profile_update_preview(
         "new_invisible_context_sha256": hashlib.sha256(
             canonical_profile_bytes(invisible_context)
         ).hexdigest(),
-        "warnings": validate_profile(profile_bundle),
+        "watermark": invisible_context["watermark"],
+        "warnings": validate_profile(profile),
     }
     return profile, invisible_context, preview
 
