@@ -58,6 +58,7 @@ def test_profile_update_previews_before_commit(tmp_path) -> None:
     assert preview["next_revision"] == 1
     assert preview["added_top_level_keys"] == ["basics", "facts"]
     assert preview["invisible_context_added_top_level_keys"] == [
+        "profile_context_zones",
         "watermark",
         "watermark_file",
     ]
@@ -70,6 +71,9 @@ def test_profile_update_previews_before_commit(tmp_path) -> None:
     assert record.revision == 1
     assert record.invisible_context["watermark"]["profile_owner"] == "Haoxiang Xu"
     assert record.invisible_context["watermark"]["profile_revision"] == 1
+    zones = record.invisible_context["profile_context_zones"]
+    assert zones["policy"]["profile_collection_mode"] == "exhaustive"
+    assert zones["policy"]["visible_resume_mode"] == "selective"
     assert load_profile(tmp_path) == record
 
 
@@ -187,9 +191,32 @@ def test_profile_watermark_verifier_detects_rendered_content_tampering(
     verified = verify_profile_watermark(embedded_profile, shared)
     assert verified["status"] == "verified"
     assert verified["binding_count"] == 2
+    assert verified["profile_context_zones_status"] == "verified"
 
     shared["context"]["watermark_file"]["content"]["name"] = "Forged Candidate"
     with pytest.raises(ProfileStoreError, match="rendered_content"):
+        verify_profile_watermark(embedded_profile, shared)
+
+
+def test_profile_watermark_verifier_detects_context_zone_tampering(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "watermark.json"
+    source.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(profile_store, "WATERMARK_FILE_PATH", source)
+    profile = {"experience": [{"organization": "Verified Employer"}]}
+    context = profile_store.build_profile_invisible_context(profile, 1)
+    shared = shared_context_document(context, profile_revision=1)
+    embedded_profile = {
+        "schema_version": PROFILE_SCHEMA_VERSION,
+        "revision": 1,
+        "updated_at": "2026-08-25T00:00:00Z",
+        "profile": profile,
+    }
+
+    shared["context"]["profile_context_zones"]["zones"][0]["profile_path"] = "$.forged"
+
+    with pytest.raises(ProfileStoreError, match="context-zone verification"):
         verify_profile_watermark(embedded_profile, shared)
 
 

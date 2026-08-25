@@ -48,6 +48,43 @@ SHARED_CONTEXT_EXAMPLE: dict[str, Any] = {
             }
         },
     },
+    "profile_context_zones": {
+        "schema_version": "resume.profile-context-zones.v1",
+        "profile_sha256": "<generated from the canonical Career Profile>",
+        "profile_revision": 1,
+        "source_attachment": "career_profile.json",
+        "zones_sha256": "<SHA-256 of the zone index>",
+        "policy": {
+            "profile_collection_mode": "exhaustive",
+            "visible_resume_mode": "selective",
+            "default_profile_visibility": "ai_only",
+            "selection_decider": "resume_generation_ai",
+            "page_budget_applies_to_profile": False,
+            "unselected_profile_content_remains_ai_readable": True,
+        },
+        "coverage": {
+            "zone_count": 1,
+            "category_counts": {"experience": 1},
+            "long_text_min_chars": 160,
+            "max_zones": 1000,
+            "truncated": False,
+        },
+        "zones": [
+            {
+                "zone_id": "ctx-<profile-bound-id>",
+                "category": "experience",
+                "kind": "record",
+                "profile_path": "$.experience[0]",
+                "value_type": "object",
+                "text_char_count": 500,
+                "content_sha256": "<SHA-256 of the source record>",
+                "source_attachment": "career_profile.json",
+                "default_visibility": "ai_only",
+                "eligible_for_visible_resume": True,
+                "item_count": 5,
+            }
+        ],
+    },
 }
 
 
@@ -115,7 +152,11 @@ def shared_context_document(
         "composition": {
             "embedded_profile_sha256": profile_sha256,
             "profile_revision": profile_revision,
-            "precedence": ["application_watermark", "code_managed_watermark_file"],
+            "precedence": [
+                "application_watermark",
+                "code_managed_watermark_file",
+                "application_generated_profile_context_zones",
+            ],
         },
         "trust": {
             "level": "application-managed-watermark",

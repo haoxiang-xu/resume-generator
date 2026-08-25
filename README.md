@@ -90,7 +90,8 @@ memory:
 ```
 
 The profile has a revision, updated timestamp, SHA-256, a flexible `profile`
-object, and an application-generated invisible watermark. A profile update is
+object, an application-generated invisible watermark, and a Profile context-zone
+index. A profile update is
 preview-only by default. The AI supplies only the Career Profile, shows the diff
 to the user, then calls `resume_profile_update` again with `confirm=true` and the
 same `expected_revision` after explicit approval. Stale revisions are rejected.
@@ -106,6 +107,29 @@ Example Profile bundle:
 
 `invisible_context` is a reserved field. Profile input containing it is rejected;
 Resume Studio derives the watermark from the canonical Profile SHA-256 and revision.
+
+### Profile first, Resume second
+
+Career Profile creation is exhaustive: collect complete experience histories,
+all supporting bullets, projects, education, certifications, publications, and
+every skill without considering whether the result would fit on one page. The
+Profile is the factual source of truth, not the human-facing resume.
+
+Resume generation is selective. The AI reads that complete Profile and chooses
+only the most relevant content for the visible LaTeX document and target role.
+Everything not selected remains available to AI readers in the embedded
+`career_profile.json`; it is not deleted merely because the visible PDF has a
+one-page budget. The same Profile can therefore produce different concise resumes
+without losing detail.
+
+Resume Studio automatically adds `profile_context_zones` to
+`shared_context.json`. Every experience and known high-volume section receives a
+zone. Items within those collections, all skills, and text values of at least 160
+characters are indexed as additional zones. Each zone records a stable
+Profile-bound ID, source JSON path, category, content SHA-256, text size, and the
+fact that its default visibility is `ai_only` but it is eligible for selection
+into a visible resume. Values remain in `career_profile.json`, avoiding another
+duplicated copy of the Profile.
 
 When `career_profile_json` is omitted from `resume_generate`, the saved workspace
 profile is embedded automatically. If no profile exists yet, generation falls
@@ -132,6 +156,8 @@ file contains a deterministic watermark generated from the selected Career
 Profile, plus a Profile-specific rendering of the code-managed
 [`resume_builder/watermark.json`](resume_builder/watermark.json). Different
 Profiles receive different watermark IDs, rendered values, and field binding IDs.
+It also contains the application-generated `profile_context_zones` index that
+maps each invisible source area back to `career_profile.json`.
 
 `watermark.json` must contain one JSON object. Its default template includes
 identity, experience, education, project, skill, certification, award,
@@ -179,6 +205,9 @@ Profile. New-format PDFs return `watermark_verification.status=verified` only wh
 the Profile binding, rendered content, every binding record, and all three hashes
 match. This verification does not depend on the installation's current template,
 so a previously generated PDF remains verifiable after `watermark.json` changes.
+When context zones are present, the same read also requires
+`profile_context_zones_status=verified` after rebuilding the complete zone index
+from the embedded Profile.
 
 Use `resume_profile_get` or `resume_shared_context_get` to inspect the generated
 watermark. There is deliberately no MCP mutation tool, CLI override, environment

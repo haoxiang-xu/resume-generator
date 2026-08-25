@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .ai_context import AIContextError, canonical_profile_bytes, parse_profile_json
+from .profile_context_zones import (
+    PROFILE_CONTEXT_ZONES_SCHEMA_VERSION,
+    build_profile_context_zones,
+)
 from .watermark_template import (
     WATERMARK_RENDER_SCHEMA_VERSION,
     WatermarkTemplateError,
@@ -222,6 +226,11 @@ def build_profile_invisible_context(
         raise ProfileStoreError(f"could not render watermark.json: {exc}") from exc
     rendered_bytes = canonical_profile_bytes(rendered_watermark.content)
     bindings_bytes = canonical_profile_bytes(rendered_watermark.bindings)
+    profile_context_zones = build_profile_context_zones(
+        profile,
+        profile_sha256=profile_sha256,
+        revision=revision,
+    )
     context = {
         "watermark": {
             "schema_version": WATERMARK_SCHEMA_VERSION,
@@ -242,6 +251,7 @@ def build_profile_invisible_context(
             "content": rendered_watermark.content,
             "bindings": rendered_watermark.bindings,
         },
+        "profile_context_zones": profile_context_zones,
     }
     validate_invisible_context(context)
     return context
@@ -459,6 +469,26 @@ def verify_profile_watermark(
     if watermark.get("profile_revision") != revision:
         raise ProfileStoreError("watermark Profile revision does not match the embedded Profile")
 
+    context_zones = context.get("profile_context_zones")
+    context_zones_status = "not_present"
+    context_zone_count = 0
+    if context_zones is not None:
+        if not isinstance(context_zones, dict):
+            raise ProfileStoreError("Profile context zones must be a JSON object")
+        if context_zones.get("schema_version") != PROFILE_CONTEXT_ZONES_SCHEMA_VERSION:
+            raise ProfileStoreError("Profile context-zone schema version is not supported")
+        expected_context_zones = build_profile_context_zones(
+            profile,
+            profile_sha256=profile_sha256,
+            revision=revision,
+        )
+        if context_zones != expected_context_zones:
+            raise ProfileStoreError(
+                "Profile context-zone verification failed against the embedded Profile"
+            )
+        context_zones_status = "verified"
+        context_zone_count = len(context_zones.get("zones", []))
+
     try:
         expected = render_watermark_template(
             template,
@@ -489,6 +519,8 @@ def verify_profile_watermark(
         "profile_sha256": profile_sha256,
         "profile_revision": revision,
         "binding_count": len(bindings),
+        "profile_context_zones_status": context_zones_status,
+        "profile_context_zone_count": context_zone_count,
         "template_sha256": template_sha256,
         "rendered_sha256": rendered_sha256,
         "bindings_sha256": bindings_sha256,

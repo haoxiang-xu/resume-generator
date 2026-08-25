@@ -159,7 +159,8 @@ def _collection_from_value(
         return [(item, f"{source_path}[{index}]") for index, item in enumerate(value)]
     if isinstance(value, dict):
         items: list[tuple[Any, str]] = []
-        for key, child in value.items():
+        for key in sorted(value, key=lambda item: _normalized_key(str(item))):
+            child = value[key]
             child_path = f"{source_path}.{key}"
             if isinstance(child, list):
                 items.extend(

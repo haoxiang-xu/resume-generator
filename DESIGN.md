@@ -88,6 +88,19 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - Actions: PDF, `.tex`, and Watermark JSON downloads remain separate; both text views are read-only and include line numbers and copy support. The Watermark tab reuses the PDF reader and displays its binding-verification status.
 - Failure semantics: compilation errors are shown without replacing the last successful result.
 
+### BC-008 - Profile-first visibility and context zones
+
+- Producer: `build_profile_context_zones`, invoked whenever Resume Studio derives a Profile's application-owned invisible context.
+- Boundary: the complete Career Profile in `career_profile.json` plus the `profile_context_zones` index in `shared_context.json`.
+- Consumer: the resume-generation AI, `resume_shared_context_get`, `resume_read_ai_context`, and any PDF attachment reader.
+- Collection policy: Profile creation is exhaustive and independent of page limits. It preserves all factual experience detail, projects, education, skills, and other supporting material.
+- Selection policy: the human-facing resume is a job-specific subset chosen during `resume_generate`. Unselected Profile information remains AI-readable and is not deleted or rewritten merely to meet a page budget.
+- Canonical representation: `resume.profile-context-zones.v1` with the bound Profile SHA-256/revision, source attachment, policy, coverage summary, deterministic zone index, and zone-index SHA-256.
+- Coverage: every known Profile collection receives a section zone; its items receive record/content zones. Arbitrary strings of at least 160 characters receive long-text zones. Skills are indexed without requiring them to appear on the visible page.
+- Privacy: zones contain paths, sizes, and hashes rather than duplicating source values. The values remain in the extractable `career_profile.json`; secrets are prohibited and private facts must not be presented as visible claims.
+- Capacity: the index is capped at 1,000 zones. If exceeded, `coverage.truncated=true`; the complete Profile remains intact and AI-readable in `career_profile.json`.
+- Integrity: `resume_read_ai_context` rebuilds the zone index from the embedded Profile and fails if paths, categories, IDs, coverage, or hashes differ. Older PDFs without zones remain readable and report the zone verification as not present.
+
 ## Sequence contract
 
 ### SEQ-001 - repeated generation
@@ -138,7 +151,9 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-020: placeholder rendering is deterministic; every binding records its source, value digest, binding ID, and collection-cycle metadata.
 - AC-021: an out-of-range one-based collection slot cycles by modulo, while an empty collection emits a Profile-bound missing marker.
 - AC-022: new-format PDF verification re-renders the embedded template and rejects mismatched Profile hashes, revisions, rendered content, bindings, or checksums.
-- AC-023: after Web generation, the rendered PDF and complete Raw LaTeX appear side by side with independent downloads.
+- AC-023: after Web generation, the rendered PDF appears beside switchable complete Raw LaTeX and verified Watermark JSON views, each with an independent download.
+- AC-024: Profile creation preserves exhaustive data independently of page limits, while generated resumes remain selective and all unselected source content remains available through the embedded Career Profile.
+- AC-025: every experience, skill collection item, known high-volume record, and arbitrary long text receives a deterministic application-generated context-zone index entry, subject only to the documented index cap.
 
 ## Current renderer constraint
 

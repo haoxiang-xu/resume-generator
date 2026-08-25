@@ -138,7 +138,8 @@ def _actual_text_bridge(profile_sha256: str, shared_context_sha256: str) -> str:
         "AI-CONTEXT: This PDF contains the associated file career_profile.json "
         "with machine-readable extended resume data. "
         f"SHA-256: {profile_sha256}. It also contains shared_context.json with "
-        f"an application-managed Profile watermark. SHA-256: {shared_context_sha256}."
+        "an application-managed Profile watermark and Profile context-zone index. "
+        f"SHA-256: {shared_context_sha256}."
     )
 
 
@@ -253,7 +254,10 @@ def add_ai_context(
             writer,
             SHARED_CONTEXT_FILENAME,
             shared_context_bytes,
-            "Application-managed invisible watermark bound to this Career Profile.",
+            (
+                "Application-managed invisible watermark and context-zone index "
+                "bound to this Career Profile."
+            ),
         )
         writer.root_object[NameObject("/AF")] = ArrayObject(
             [profile_reference, shared_context_reference]
