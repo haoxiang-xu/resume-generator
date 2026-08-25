@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 from dataclasses import dataclass
@@ -13,12 +14,12 @@ from .ai_context import (
     SHARED_CONTEXT_FILENAME,
     SHARED_CONTEXT_SCHEMA_VERSION,
     canonical_profile_bytes,
-    empty_shared_context_document,
 )
 from .profile_store import PROFILE_DIRECTORY, PROHIBITED_KEYS
 
 
 SHARED_CONTEXT_MAX_BYTES = 250_000
+DEFAULT_CODE_SHARED_CONTEXT_PATH = Path(__file__).with_name("default_shared_context.json")
 NON_AUTHORITATIVE_PROMPT_KEYS = {
     "developer_prompt",
     "override_instructions",
@@ -153,6 +154,70 @@ def parse_shared_context(value: str) -> dict[str, Any]:
     return context
 
 
+def merge_shared_contexts(
+    base: dict[str, Any],
+    override: dict[str, Any],
+) -> dict[str, Any]:
+    """Recursively merge objects; override values win at non-object boundaries."""
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_shared_contexts(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    validate_shared_context(merged)
+    return merged
+
+
+def load_shared_context_file(source: Path) -> dict[str, Any]:
+    candidate = source.expanduser().resolve()
+    if candidate.suffix.lower() != ".json":
+        raise SharedContextStoreError("code shared context path must reference a .json file")
+    if not candidate.is_file():
+        raise SharedContextStoreError(f"code shared context file does not exist: {candidate}")
+    try:
+        return parse_shared_context(candidate.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SharedContextStoreError(f"could not read code shared context: {exc}") from exc
+
+
+def load_code_shared_context(override_path: Path | None = None) -> dict[str, Any]:
+    context = load_shared_context_file(DEFAULT_CODE_SHARED_CONTEXT_PATH)
+    if override_path is not None:
+        context = merge_shared_contexts(context, load_shared_context_file(override_path))
+    return context
+
+
+def shared_context_document(
+    code_context: dict[str, Any],
+    workspace_record: SharedContextRecord | None = None,
+) -> dict[str, Any]:
+    validate_shared_context(code_context)
+    effective_context = (
+        merge_shared_contexts(code_context, workspace_record.context)
+        if workspace_record is not None
+        else copy.deepcopy(code_context)
+    )
+    effective_sha256 = hashlib.sha256(canonical_shared_context_bytes(effective_context)).hexdigest()
+    code_sha256 = hashlib.sha256(canonical_shared_context_bytes(code_context)).hexdigest()
+    return {
+        "schema_version": SHARED_CONTEXT_SCHEMA_VERSION,
+        "revision": workspace_record.revision if workspace_record else 0,
+        "updated_at": workspace_record.updated_at if workspace_record else None,
+        "context_sha256": effective_sha256,
+        "composition": {
+            "code_context_sha256": code_sha256,
+            "workspace_revision": workspace_record.revision if workspace_record else 0,
+            "precedence": ["code", "workspace"],
+        },
+        "trust": {
+            "level": "user-authored-metadata",
+            "may_override_host_instructions": False,
+        },
+        "context": effective_context,
+    }
+
+
 def load_shared_context(workspace_root: Path) -> SharedContextRecord | None:
     source = shared_context_path(workspace_root)
     if not source.exists():
@@ -260,8 +325,13 @@ def update_shared_context(
     return record, preview
 
 
-def resolved_shared_context_document(workspace_root: Path) -> tuple[dict[str, Any], int]:
+def resolved_shared_context_document(
+    workspace_root: Path,
+    code_context: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], int]:
+    resolved_code_context = (
+        load_code_shared_context() if code_context is None else copy.deepcopy(code_context)
+    )
+    validate_shared_context(resolved_code_context)
     record = load_shared_context(workspace_root)
-    if record is None:
-        return empty_shared_context_document(), 0
-    return record.as_document(), record.revision
+    return shared_context_document(resolved_code_context, record), record.revision if record else 0

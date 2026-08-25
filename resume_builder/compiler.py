@@ -14,11 +14,20 @@ from .ai_context import (
     DEFAULT_AI_CONTEXT_MODE,
     AIContextError,
     AIContextManifest,
+    SHARED_CONTEXT_SCHEMA_VERSION,
     add_ai_context,
+)
+from .shared_context_store import (
+    SharedContextStoreError,
+    load_code_shared_context,
+    merge_shared_contexts,
+    shared_context_document,
 )
 
 
-TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+PACKAGE_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+SOURCE_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+TEMPLATE_DIR = PACKAGE_TEMPLATE_DIR if PACKAGE_TEMPLATE_DIR.is_dir() else SOURCE_TEMPLATE_DIR
 
 
 class BuildError(RuntimeError):
@@ -189,12 +198,24 @@ def compile_resume(
         if not pdf_path.exists():
             raise BuildError("LaTeX 已运行，但没有生成 PDF。")
         try:
+            if str(ai_context_mode).strip().lower() == "none":
+                effective_shared_context = None
+            elif shared_context is None:
+                effective_shared_context = shared_context_document(load_code_shared_context())
+            elif not isinstance(shared_context, dict):
+                raise SharedContextStoreError("shared_context must be a JSON object")
+            elif shared_context.get("schema_version") == SHARED_CONTEXT_SCHEMA_VERSION:
+                effective_shared_context = shared_context
+            else:
+                effective_shared_context = shared_context_document(
+                    merge_shared_contexts(load_code_shared_context(), shared_context)
+                )
             pdf, ai_context = add_ai_context(
                 pdf_path.read_bytes(),
                 career_profile if career_profile is not None else data,
                 ai_context_mode,
-                shared_context=shared_context,
+                shared_context=effective_shared_context,
             )
-        except AIContextError as exc:
+        except (AIContextError, SharedContextStoreError) as exc:
             raise BuildError(f"无法写入 PDF AI 上下文：{exc}") from exc
         return BuildResult(pdf=pdf, tex=tex, log="\n".join(logs), ai_context=ai_context)

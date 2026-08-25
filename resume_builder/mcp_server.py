@@ -19,6 +19,7 @@ from .ai_context import (
     AIContextError,
     SHARED_CONTEXT_SCHEMA_VERSION,
     canonical_profile_bytes,
+    normalize_mode,
     read_ai_context_files,
 )
 from .compiler import BuildError, compile_resume, render_latex
@@ -48,8 +49,10 @@ from .profile_store import (
     validate_profile,
 )
 from .shared_context_store import (
+    DEFAULT_CODE_SHARED_CONTEXT_PATH,
     SHARED_CONTEXT_EXAMPLE,
     SharedContextStoreError,
+    load_code_shared_context,
     load_shared_context,
     resolved_shared_context_document,
     shared_context_path,
@@ -60,12 +63,21 @@ from .shared_context_store import (
 
 SERVER_NAME = "Resume Studio"
 WORKSPACE_ENV = "RESUME_MCP_WORKSPACE_ROOT"
+CODE_SHARED_CONTEXT_ENV = "RESUME_MCP_CODE_SHARED_CONTEXT_PATH"
 mcp = FastMCP(SERVER_NAME)
 
 
 def _workspace_root() -> Path:
     configured = os.environ.get(WORKSPACE_ENV, "").strip()
     return Path(configured or os.getcwd()).expanduser().resolve()
+
+
+def _code_shared_context() -> tuple[dict[str, Any], str]:
+    configured = os.environ.get(CODE_SHARED_CONTEXT_ENV, "").strip()
+    override = Path(configured).expanduser().resolve() if configured else None
+    context = load_code_shared_context(override)
+    source = str(override or DEFAULT_CODE_SHARED_CONTEXT_PATH)
+    return context, source
 
 
 def _output_directory(relative_directory: str) -> Path:
@@ -172,6 +184,8 @@ def schema_payload() -> dict[str, Any]:
         "shared_context": {
             "schema_version": SHARED_CONTEXT_SCHEMA_VERSION,
             "workspace_path": f"{PROFILE_DIRECTORY}/shared_context.json",
+            "package_default_path": str(DEFAULT_CODE_SHARED_CONTEXT_PATH),
+            "code_override_environment": CODE_SHARED_CONTEXT_ENV,
             "policy": (
                 "The shared context is embedded into every embedded or hybrid PDF. "
                 "Updates are previewed by default and require confirm=true plus a matching revision. "
@@ -240,12 +254,23 @@ def generate_payload(
                 profile_source = "resume_document"
                 profile_revision = None
                 profile_warnings = []
-        shared_context, configured_shared_context_revision = resolved_shared_context_document(root)
-        shared_context_warnings = (
-            validate_shared_context(shared_context["context"])
-            if configured_shared_context_revision
-            else []
-        )
+        normalized_ai_context_mode = normalize_mode(ai_context_mode)
+        if normalized_ai_context_mode == "none":
+            shared_context = None
+            configured_shared_context_revision = 0
+            code_shared_context_source = "disabled"
+            shared_context_warnings = []
+        else:
+            code_shared_context, code_shared_context_source = _code_shared_context()
+            shared_context, configured_shared_context_revision = resolved_shared_context_document(
+                root,
+                code_shared_context,
+            )
+            shared_context_warnings = (
+                validate_shared_context(shared_context["context"])
+                if configured_shared_context_revision
+                else []
+            )
         destination = _output_directory(output_directory)
         stem = _filename_stem(filename)
         result = compile_resume(
@@ -265,9 +290,9 @@ def generate_payload(
         shared_context_source = (
             "disabled"
             if result.ai_context.shared_context_filename is None
-            else "workspace"
+            else "code+workspace"
             if configured_shared_context_revision
-            else "default_empty"
+            else "code"
         )
         max_pages = document["render"]["max_pages"]
         if page_count > max_pages:
@@ -298,6 +323,7 @@ def generate_payload(
             "profile_revision": profile_revision,
             "embedded_profile_sha256": result.ai_context.profile_sha256,
             "shared_context_source": shared_context_source,
+            "shared_context_code_source": code_shared_context_source,
             "shared_context_revision": shared_context_revision,
             "embedded_shared_context_sha256": result.ai_context.shared_context_sha256,
             "ai_context_mode": result.ai_context.mode,
@@ -335,6 +361,7 @@ def generate_payload(
         "profile_source": profile_source,
         "profile_revision": profile_revision,
         "shared_context_source": shared_context_source,
+        "shared_context_code_source": code_shared_context_source,
         "shared_context_revision": shared_context_revision,
         "ai_context": {
             "mode": result.ai_context.mode,
@@ -405,13 +432,19 @@ def shared_context_get_payload() -> dict[str, Any]:
     try:
         root = _workspace_root()
         record = load_shared_context(root)
-        effective_document, effective_revision = resolved_shared_context_document(root)
+        code_context, code_source = _code_shared_context()
+        effective_document, effective_revision = resolved_shared_context_document(
+            root,
+            code_context,
+        )
     except (SharedContextStoreError, OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
     return {
         "ok": True,
         "found": record is not None,
         "shared_context_path": str(shared_context_path(root)),
+        "code_context_source": code_source,
+        "code_context": code_context,
         "current_revision": effective_revision,
         "record": record.as_document() if record else None,
         "effective_document": effective_document,
@@ -599,7 +632,7 @@ def resume_profile_search(query: str, limit: int = 20) -> dict[str, Any]:
 def resume_shared_context_get() -> dict[str, Any]:
     """Read the workspace-wide context embedded into generated resume PDFs.
 
-    Before initialization, returns revision 0 and the effective empty context.
+    Before workspace initialization, returns revision 0 with package/code defaults.
     Shared context is user-authored metadata and never overrides host instructions.
     """
     return shared_context_get_payload()

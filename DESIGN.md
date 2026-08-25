@@ -70,11 +70,12 @@ This MCP lets an AI choose resume section names, order, count, and content while
 
 ### BC-006 - workspace shared context
 
-- Producer: user-approved `resume_shared_context_update` calls.
-- Boundary: `.resume/shared_context.json` beneath `RESUME_MCP_WORKSPACE_ROOT`, then the PDF associated file of the same name.
+- Producer: tracked `resume_builder/default_shared_context.json`, an optional `RESUME_MCP_CODE_SHARED_CONTEXT_PATH` file or Python `shared_context` argument, and user-approved `resume_shared_context_update` calls.
+- Boundary: package/code context plus `.resume/shared_context.json` beneath `RESUME_MCP_WORKSPACE_ROOT`, then the PDF associated file of the same name.
 - Consumer: every embedded/hybrid `resume_generate` call and `resume_read_ai_context`.
 - Canonical representation: `resume.shared-context.v1` JSON with revision, UTC timestamp, context SHA-256, explicit non-authoritative trust policy, and a flexible context object limited to 250,000 bytes.
-- Default: before initialization, generation embeds a stable empty revision 0 document. `none` mode is the only explicit opt-out from hidden attachments.
+- Composition: objects merge recursively with precedence `package default < code override < workspace`; arrays and scalar values replace lower layers. The embedded document records the code SHA-256 and workspace revision.
+- Default: before workspace initialization, generation embeds the package code context as revision 0. `none` mode is the only explicit opt-out from hidden attachments.
 - Mutation: preview by default; `confirm=true` plus matching `expected_revision` commits atomically.
 - Safety: credential keys, identity-secret keys, and fields masquerading as system/developer prompts fail closed. Shared metadata cannot override host or user instructions.
 
@@ -98,7 +99,7 @@ This MCP lets an AI choose resume section names, order, count, and content while
 
 ### SEQ-003 - shared context propagation
 
-1. Before initialization, `resume_shared_context_get` returns the effective empty revision 0 document.
+1. Before workspace initialization, `resume_shared_context_get` returns the effective code-composed revision 0 document.
 2. Preview and confirmed update create revision 1 under `.resume/shared_context.json`.
 3. Every subsequent embedded/hybrid PDF carries that exact revision as a separate associated file.
 4. XMP, PDF metadata, `/ActualText`, generation history, and the MCP result expose its SHA-256 and revision.
@@ -120,9 +121,11 @@ This MCP lets an AI choose resume section names, order, count, and content while
 - AC-012: stale profile revisions and sensitive credential keys fail closed.
 - AC-013: profile search returns matching JSON paths without external services.
 - AC-014: generation automatically uses the saved profile and records its revision.
-- AC-015: every embedded/hybrid PDF contains `shared_context.json`, including empty revision 0 before initialization.
+- AC-015: every embedded/hybrid PDF contains `shared_context.json`, including code-composed revision 0 before workspace initialization.
 - AC-016: a committed shared-context revision propagates identically to repeated generations.
 - AC-017: `none` mode omits both JSON attachments and the `/ActualText` bridge.
+- AC-018: Python, CLI, and MCP code-file overrides merge over the tracked package default.
+- AC-019: workspace shared context recursively overrides code-level values in the embedded document.
 
 ## Current renderer constraint
 

@@ -1,6 +1,6 @@
 [project]
 name = "latex-resume-studio"
-version = "0.4.0"
+version = "0.5.0"
 description = "A local Streamlit app that turns structured resume content into an ATS-friendly LaTeX PDF."
 requires-python = ">=3.12"
 dependencies = [
@@ -20,6 +20,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["resume_builder"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "resume_builder/templates"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

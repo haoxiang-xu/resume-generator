@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 from pypdf import PdfReader
 
-from resume_builder.ai_context import SHARED_CONTEXT_FILENAME, SHARED_CONTEXT_SCHEMA_VERSION
+from resume_builder.ai_context import (
+    SHARED_CONTEXT_FILENAME,
+    SHARED_CONTEXT_SCHEMA_VERSION,
+    read_ai_context_files,
+)
+from resume_builder.compiler import compile_resume
 from resume_builder.flexible_schema import EXAMPLE_DOCUMENT
 from resume_builder.mcp_server import (
     generate_payload,
@@ -55,20 +60,34 @@ def test_shared_context_rejects_host_prompt_impersonation(tmp_path) -> None:
         )
 
 
-def test_default_empty_shared_context_is_embedded(tmp_path, monkeypatch) -> None:
+def test_python_api_merges_code_context_over_package_default() -> None:
+    result = compile_resume(
+        EXAMPLE_DOCUMENT,
+        template_name="flexible.tex.j2",
+        shared_context={"code_layer": {"enabled": True}},
+    )
+    _, shared_context, _ = read_ai_context_files(result.pdf)
+
+    assert shared_context is not None
+    assert shared_context["context"]["generator"]["name"] == "Resume Studio"
+    assert shared_context["context"]["code_layer"]["enabled"] is True
+
+
+def test_package_code_shared_context_is_embedded_by_default(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RESUME_MCP_WORKSPACE_ROOT", str(tmp_path))
 
     generated = generate_payload(json.dumps(EXAMPLE_DOCUMENT), "default-shared", "artifacts")
     extracted = read_ai_context_payload(generated["pdf_path"])
 
     assert generated["ok"] is True
-    assert generated["shared_context_source"] == "default_empty"
+    assert generated["shared_context_source"] == "code"
     assert generated["shared_context_revision"] == 0
     assert generated["ai_context"]["shared_context_filename"] == SHARED_CONTEXT_FILENAME
     assert extracted["ok"] is True
     assert extracted["shared_context"]["schema_version"] == SHARED_CONTEXT_SCHEMA_VERSION
     assert extracted["shared_context"]["revision"] == 0
-    assert extracted["shared_context"]["context"] == {}
+    assert extracted["shared_context"]["context"]["generator"]["name"] == "Resume Studio"
+    assert extracted["shared_context"]["composition"]["precedence"] == ["code", "workspace"]
 
 
 def test_saved_shared_context_is_embedded_in_every_pdf(tmp_path, monkeypatch) -> None:
@@ -87,11 +106,46 @@ def test_saved_shared_context_is_embedded_in_every_pdf(tmp_path, monkeypatch) ->
     second = generate_payload(json.dumps(EXAMPLE_DOCUMENT), "shared-second", "artifacts")
 
     for generated in (first, second):
-        assert generated["shared_context_source"] == "workspace"
+        assert generated["shared_context_source"] == "code+workspace"
         assert generated["shared_context_revision"] == 1
         extracted = read_ai_context_payload(generated["pdf_path"])
         assert extracted["shared_context"]["revision"] == 1
-        assert extracted["shared_context"]["context"] == SHARED_CONTEXT
+        assert extracted["shared_context"]["context"]["owner_preferences"] == SHARED_CONTEXT[
+            "owner_preferences"
+        ]
+        assert extracted["shared_context"]["context"]["generator"]["name"] == "Resume Studio"
+
+
+def test_code_file_override_merges_before_workspace(tmp_path, monkeypatch) -> None:
+    override = tmp_path / "code-context.json"
+    override.write_text(
+        json.dumps(
+            {
+                "generator": {"distribution": "custom"},
+                "owner_preferences": {"default_resume_language": "French"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RESUME_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("RESUME_MCP_CODE_SHARED_CONTEXT_PATH", str(override))
+
+    initial = shared_context_get_payload()
+    assert initial["code_context"]["generator"]["name"] == "Resume Studio"
+    assert initial["code_context"]["generator"]["distribution"] == "custom"
+    assert initial["effective_document"]["context"]["owner_preferences"][
+        "default_resume_language"
+    ] == "French"
+
+    workspace_override = {"owner_preferences": {"default_resume_language": "English"}}
+    shared_context_update_payload(json.dumps(workspace_override), 0, True)
+    generated = generate_payload(json.dumps(EXAMPLE_DOCUMENT), "layered", "artifacts")
+    extracted = read_ai_context_payload(generated["pdf_path"])
+
+    assert extracted["shared_context"]["context"]["generator"]["distribution"] == "custom"
+    assert extracted["shared_context"]["context"]["owner_preferences"][
+        "default_resume_language"
+    ] == "English"
 
 
 def test_none_mode_omits_shared_context_and_profile(tmp_path, monkeypatch) -> None:

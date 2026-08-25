@@ -114,8 +114,8 @@ appropriate access controls.
 
 Every `embedded` or `hybrid` PDF contains a separate `shared_context.json`. This
 is the common machine-readable area shared by every resume generated from the
-workspace. Before initialization it exists as an empty revision 0 document, so
-the attachment contract is stable from the first PDF onward.
+workspace. Before workspace initialization it contains the package code defaults
+as revision 0, so the attachment contract is stable from the first PDF onward.
 
 Use `resume_shared_context_get` to inspect it and `resume_shared_context_update`
 to preview or explicitly commit changes. Typical contents include default resume
@@ -126,3 +126,52 @@ with credentials and identity secrets, are rejected.
 
 `ai_context_mode=none` remains the explicit escape hatch and produces a PDF with
 no `career_profile.json`, no `shared_context.json`, and no `/ActualText` bridge.
+
+### Add shared context from code
+
+The tracked package default lives at:
+
+```text
+resume_builder/default_shared_context.json
+```
+
+Edit that file to ship public, installation-wide metadata with every generated
+PDF. Do not put personal or secret data there because it is part of the source
+repository and Python package.
+
+Python callers can add or override code-level values directly:
+
+```python
+from resume_builder import compile_resume
+
+result = compile_resume(
+    resume_data,
+    shared_context={
+        "generator": {"distribution": "internal"},
+        "owner_preferences": {"default_page_limit": 1},
+    },
+)
+```
+
+The command line accepts a JSON override:
+
+```bash
+uv run resume-build resume.json output/resume.pdf \
+  --shared-context config/my_shared_context.json
+```
+
+For MCP hosts, point to an additional code-managed JSON file:
+
+```text
+RESUME_MCP_CODE_SHARED_CONTEXT_PATH=/absolute/path/to/shared_context.json
+```
+
+Values are recursively merged with this precedence:
+
+```text
+package default < code file / Python argument < workspace .resume/shared_context.json
+```
+
+Objects merge recursively; arrays and scalar values are replaced by the higher
+precedence layer. The embedded document records the code-context SHA-256 and
+workspace revision used to compose it.
